@@ -1,0 +1,43 @@
+# --- secrets ---
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.key
+*.pem
+
+# --- private / real data (client transcripts, CRM exports, PII) ---
+data/raw/
+data/interim/
+data/processed/private/
+*.csv
+*.parquet
+*.xlsx
+!tests/fixtures/**/*.csv
+!evals/datasets/**/*.csv
+
+# --- pre-existing local docs (business/partner docs, not for a public repo) ---
+/*.md
+/*.html
+!README.md
+!AGENTS.md
+!CLAUDE.md
+
+# --- python ---
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# --- editor / os ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
