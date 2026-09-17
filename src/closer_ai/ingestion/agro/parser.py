@@ -18,14 +18,29 @@ transcript with zero usable segments). Quality flags:
 - missing_participants: the `participants` field was empty/absent; participants were
   reconstructed from speaker labels seen in the transcript instead.
 - unresolved_speaker: a transcript entry's speaker label did not match any known
-  participant; a placeholder participant (role "unknown") was synthesized for it.
+  participant (missing, or present but not a usable string), or a `participants`
+  entry's label/name/id was present but not a usable string. Either way, the entry
+  is not silently dropped — a placeholder participant (role "unknown") is
+  synthesized so the evidence is preserved, just unattributed.
 - missing_timestamp: a transcript entry was missing `start`/`end` and was dropped.
-- missing_duration: `duration_seconds` was absent; estimated from the last segment's
-  `end_ts` instead.
+- missing_duration: `duration_seconds` was absent; estimated from the maximum
+  `end_ts` across the parsed segments (not the last segment in list order — the
+  two coincide in a chronological transcript, but crosstalk/out-of-order input
+  would not, and this schema explicitly allows both).
 - transcript_parse_error: a transcript entry was structurally unusable (not a mapping,
-  blank text, or `end <= start`) and was dropped.
-- metadata_incomplete: descriptive metadata (topic/transcript_source/zoom_summary, or
-  an unresolved `closer` label) was missing — informational only, never blocks output.
+  blank/non-string text, or `end <= start`) and was dropped.
+- metadata_incomplete: descriptive metadata (topic/transcript_source/zoom_summary) was
+  missing, or a `closer` label was given but did not resolve to any known participant
+  — informational only, never blocks output. `closer` simply absent (None) does NOT
+  raise this flag: "we were never told" and "we were told and couldn't find them" are
+  different signals, and only the latter indicates something went wrong upstream.
+- participant_id_collision: two different raw labels (participants entries, or a
+  transcript speaker label against an already-known participant) normalized via
+  `_slugify` to the same participant id. KNOWN LIMITATION: participant identity in
+  this hypothesis format is name-based, not backed by a stable source id (Zoom
+  participant UUID, email, ...) — see docs/domain/AGRO_INGESTION_CONTRACT.md. This
+  flag makes the resulting merge/attribution visible for manual triage; it does not
+  (and, without a stable id from the real source, cannot safely) resolve it.
 
 All flags end up in `AgroParseResult.raw_input["quality_flags"]`, so they flow
 straight into `Call.quality_flags` via the existing mechanism — no schema change.
@@ -50,6 +65,7 @@ FLAG_MISSING_TIMESTAMP = "missing_timestamp"
 FLAG_MISSING_DURATION = "missing_duration"
 FLAG_TRANSCRIPT_PARSE_ERROR = "transcript_parse_error"
 FLAG_METADATA_INCOMPLETE = "metadata_incomplete"
+FLAG_PARTICIPANT_ID_COLLISION = "participant_id_collision"
 
 
 class AgroParseError(Exception):
@@ -72,6 +88,39 @@ def _slugify(label: str) -> str:
     return slug or "unknown_speaker"
 
 
+def _as_str(value: Any) -> str | None:
+    """A `dict[str, Any]` entry from the source is untyped by design (we don't control
+    the real Zoom/Agro shape yet). A truthy value that isn't a usable string (an int,
+    a list, a nested dict, ...) is source data we can't safely turn into a label or
+    slugify — treat it exactly like "missing", never pass it to `_slugify`."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _find_participant(participants: list[dict[str, Any]], pid: str) -> dict[str, Any] | None:
+    return next((p for p in participants if p["id"] == pid), None)
+
+
+def _register_participant_or_flag_collision(
+    participants: list[dict[str, Any]],
+    participant_ids: set[str],
+    flags: list[str],
+    *,
+    pid: str,
+    label: str,
+    role: str = "unknown",
+) -> None:
+    """Adds a new participant for `pid`, or — if `pid` is already taken by a
+    participant registered under a *different* raw label — flags the collision
+    instead of silently dropping or misattributing the new one."""
+    existing = _find_participant(participants, pid)
+    if existing is None:
+        participant_ids.add(pid)
+        participants.append({"id": pid, "name": label, "role": role})
+        return
+    if existing["name"] not in (None, label):
+        _add_flag(flags, FLAG_PARTICIPANT_ID_COLLISION)
+
+
 def _parse_participants(
     raw_participants: list[dict[str, Any]] | None, flags: list[str]
 ) -> tuple[list[dict[str, Any]], set[str]]:
@@ -82,15 +131,14 @@ def _parse_participants(
     participants: list[dict[str, Any]] = []
     participant_ids: set[str] = set()
     for entry in raw_participants:
-        label = entry.get("label") or entry.get("name") or entry.get("id")
+        label = _as_str(entry.get("label")) or _as_str(entry.get("name")) or _as_str(entry.get("id"))
         if not label:
             continue
         pid = _slugify(label)
-        if pid in participant_ids:
-            continue
-        participant_ids.add(pid)
-        participants.append(
-            {"id": pid, "name": entry.get("name", label), "role": entry.get("role") or "unknown"}
+        name = _as_str(entry.get("name")) or label
+        role = entry.get("role") or "unknown"
+        _register_participant_or_flag_collision(
+            participants, participant_ids, flags, pid=pid, label=name, role=role
         )
 
     if not participants:
@@ -132,8 +180,10 @@ def _parse_transcript(
             _add_flag(flags, FLAG_TRANSCRIPT_PARSE_ERROR)
             continue
 
-        label = entry.get("speaker")
+        label = _as_str(entry.get("speaker"))
         if not label:
+            # missing, or present but not a usable string (e.g. a numeric id, a
+            # nested object) — same bucket, we can't attribute it to anyone by name
             _add_flag(flags, FLAG_UNRESOLVED_SPEAKER)
             speaker_id = "unknown_speaker"
             if speaker_id not in participant_ids:
@@ -145,6 +195,10 @@ def _parse_transcript(
                 _add_flag(flags, FLAG_UNRESOLVED_SPEAKER)
                 participant_ids.add(speaker_id)
                 participants.append({"id": speaker_id, "name": label, "role": "unknown"})
+            else:
+                existing = _find_participant(participants, speaker_id)
+                if existing is not None and existing["name"] not in (None, label):
+                    _add_flag(flags, FLAG_PARTICIPANT_ID_COLLISION)
 
         segments.append(
             {"speaker_id": speaker_id, "start_ts": float(start), "end_ts": float(end), "text": text}
@@ -164,12 +218,18 @@ def _resolve_closer(
     pid = _slugify(closer_label)
     if pid not in participant_ids:
         return None
-    for participant in participants:
-        if participant["id"] == pid:
-            if participant["role"] == "unknown":
-                participant["role"] = "closer"
-            return pid
-    return None
+    participant = _find_participant(participants, pid)
+    if participant is None:
+        return None
+    if participant["role"] not in ("unknown", "closer"):
+        # `closer` resolves (by slug) to a participant already known as something
+        # else (e.g. "lead") — either a source-data conflict or a slug collision
+        # (see FLAG_PARTICIPANT_ID_COLLISION). Never silently overwrite an existing
+        # role or fabricate a resolution: treat as unresolved, same as no match at
+        # all — the caller flags metadata_incomplete for that.
+        return None
+    participant["role"] = "closer"
+    return pid
 
 
 def parse_agro_call(
@@ -178,7 +238,13 @@ def parse_agro_call(
     try:
         parsed = AgroRawCall.model_validate(raw)
     except ValidationError as exc:
-        raise AgroParseError(f"invalid Agro raw call structure: {exc}") from exc
+        # Deliberately built from exc.errors() (field path + message only), never
+        # str(exc)/exc itself — pydantic's default rendering echoes the rejected
+        # input value per field and links to https://errors.pydantic.dev/..., either
+        # of which could put source content in an exception message meant to be safe
+        # to log (see docs/domain/AGRO_INGESTION_CONTRACT.md — no PII in logs).
+        fields = ", ".join(".".join(str(part) for part in error["loc"]) for error in exc.errors())
+        raise AgroParseError(f"invalid Agro raw call structure (fields: {fields})") from exc
 
     flags: list[str] = []
 
@@ -240,5 +306,16 @@ def normalize_agro_call(
     raw: dict[str, Any], *, company_id: str, source: str = "agro_zoom"
 ) -> tuple[Call, AgroParseResult]:
     result = parse_agro_call(raw, company_id=company_id, source=source)
-    call = normalize_call(result.raw_input)
+    try:
+        call = normalize_call(result.raw_input)
+    except ValidationError as exc:
+        # Defense-in-depth, not the primary contract: parse_agro_call() already
+        # guards the invariants it knows about (span, text, tz-awareness, duration),
+        # but participants[].role comes straight from an untyped source field and is
+        # only validated by Call's own Literal — this is the one remaining path a
+        # pydantic.ValidationError could otherwise leak through undocumented.
+        raise AgroParseError(
+            f"meeting {result.metadata['meeting_id']}: parsed input rejected by "
+            f"normalize_call()"
+        ) from exc
     return call, result
