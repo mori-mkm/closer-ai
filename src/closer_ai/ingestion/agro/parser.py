@@ -1,0 +1,236 @@
+"""Agro/Zoom raw call -> input dict for `closer_ai.normalization.normalize.normalize_call`.
+
+Pipeline:
+
+    AgroRawCall (validated source shape)
+        -> parse_agro_call()
+        -> AgroParseResult.raw_input  (dict compatible with normalize_call())
+        -> normalize_call()
+        -> Call
+
+`parse_agro_call` never invents data. A missing/malformed field either becomes a
+quality flag (recoverable — the field is dropped or estimated) or an `AgroParseError`
+(the call cannot become a valid `Call` at all: no stable identity, no timestamp, or a
+transcript with zero usable segments). Quality flags:
+
+- missing_transcript: the `transcript` field itself was not provided (None).
+- empty_transcript: `transcript` was provided but no usable segment survived parsing.
+- missing_participants: the `participants` field was empty/absent; participants were
+  reconstructed from speaker labels seen in the transcript instead.
+- unresolved_speaker: a transcript entry's speaker label did not match any known
+  participant; a placeholder participant (role "unknown") was synthesized for it.
+- missing_timestamp: a transcript entry was missing `start`/`end` and was dropped.
+- missing_duration: `duration_seconds` was absent; estimated from the last segment's
+  `end_ts` instead.
+- transcript_parse_error: a transcript entry was structurally unusable (not a mapping,
+  blank text, or `end <= start`) and was dropped.
+- metadata_incomplete: descriptive metadata (topic/transcript_source/zoom_summary, or
+  an unresolved `closer` label) was missing — informational only, never blocks output.
+
+All flags end up in `AgroParseResult.raw_input["quality_flags"]`, so they flow
+straight into `Call.quality_flags` via the existing mechanism — no schema change.
+"""
+from __future__ import annotations
+
+import re
+import unicodedata
+from typing import Any
+
+from pydantic import ValidationError
+
+from closer_ai.ingestion.agro.models import AgroParseResult, AgroRawCall
+from closer_ai.normalization.models import Call
+from closer_ai.normalization.normalize import normalize_call
+
+FLAG_MISSING_TRANSCRIPT = "missing_transcript"
+FLAG_EMPTY_TRANSCRIPT = "empty_transcript"
+FLAG_MISSING_PARTICIPANTS = "missing_participants"
+FLAG_UNRESOLVED_SPEAKER = "unresolved_speaker"
+FLAG_MISSING_TIMESTAMP = "missing_timestamp"
+FLAG_MISSING_DURATION = "missing_duration"
+FLAG_TRANSCRIPT_PARSE_ERROR = "transcript_parse_error"
+FLAG_METADATA_INCOMPLETE = "metadata_incomplete"
+
+
+class AgroParseError(Exception):
+    """Raised only when a raw Agro/Zoom call cannot become a valid `Call` at all:
+    missing/blank meeting_id, missing or non-tz-aware occurred_at, or a transcript
+    with zero usable segments. Anything else recoverable becomes a quality flag."""
+
+
+def _add_flag(flags: list[str], flag: str) -> None:
+    if flag not in flags:
+        flags.append(flag)
+
+
+def _slugify(label: str) -> str:
+    normalized = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "_", normalized.lower()).strip("_")
+    return slug or "unknown_speaker"
+
+
+def _parse_participants(
+    raw_participants: list[dict[str, Any]] | None, flags: list[str]
+) -> tuple[list[dict[str, Any]], set[str]]:
+    if not raw_participants:
+        _add_flag(flags, FLAG_MISSING_PARTICIPANTS)
+        return [], set()
+
+    participants: list[dict[str, Any]] = []
+    participant_ids: set[str] = set()
+    for entry in raw_participants:
+        label = entry.get("label") or entry.get("name") or entry.get("id")
+        if not label:
+            continue
+        pid = _slugify(label)
+        if pid in participant_ids:
+            continue
+        participant_ids.add(pid)
+        participants.append(
+            {"id": pid, "name": entry.get("name", label), "role": entry.get("role") or "unknown"}
+        )
+
+    if not participants:
+        _add_flag(flags, FLAG_MISSING_PARTICIPANTS)
+    return participants, participant_ids
+
+
+def _parse_transcript(
+    raw_transcript: list[dict[str, Any]] | None,
+    participants: list[dict[str, Any]],
+    participant_ids: set[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    flags: list[str] = []
+
+    if raw_transcript is None:
+        _add_flag(flags, FLAG_MISSING_TRANSCRIPT)
+        return [], flags
+    if not raw_transcript:
+        _add_flag(flags, FLAG_EMPTY_TRANSCRIPT)
+        return [], flags
+
+    segments: list[dict[str, Any]] = []
+    for entry in raw_transcript:
+        if not isinstance(entry, dict):
+            _add_flag(flags, FLAG_TRANSCRIPT_PARSE_ERROR)
+            continue
+
+        text = entry.get("text")
+        if not isinstance(text, str) or not text.strip():
+            _add_flag(flags, FLAG_TRANSCRIPT_PARSE_ERROR)
+            continue
+
+        start = entry.get("start")
+        end = entry.get("end")
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+            _add_flag(flags, FLAG_MISSING_TIMESTAMP)
+            continue
+        if end <= start:
+            _add_flag(flags, FLAG_TRANSCRIPT_PARSE_ERROR)
+            continue
+
+        label = entry.get("speaker")
+        if not label:
+            _add_flag(flags, FLAG_UNRESOLVED_SPEAKER)
+            speaker_id = "unknown_speaker"
+            if speaker_id not in participant_ids:
+                participant_ids.add(speaker_id)
+                participants.append({"id": speaker_id, "name": None, "role": "unknown"})
+        else:
+            speaker_id = _slugify(label)
+            if speaker_id not in participant_ids:
+                _add_flag(flags, FLAG_UNRESOLVED_SPEAKER)
+                participant_ids.add(speaker_id)
+                participants.append({"id": speaker_id, "name": label, "role": "unknown"})
+
+        segments.append(
+            {"speaker_id": speaker_id, "start_ts": float(start), "end_ts": float(end), "text": text}
+        )
+
+    if not segments:
+        _add_flag(flags, FLAG_EMPTY_TRANSCRIPT)
+
+    return segments, flags
+
+
+def _resolve_closer(
+    closer_label: str | None, participants: list[dict[str, Any]], participant_ids: set[str]
+) -> str | None:
+    if not closer_label:
+        return None
+    pid = _slugify(closer_label)
+    if pid not in participant_ids:
+        return None
+    for participant in participants:
+        if participant["id"] == pid:
+            if participant["role"] == "unknown":
+                participant["role"] = "closer"
+            return pid
+    return None
+
+
+def parse_agro_call(
+    raw: dict[str, Any], *, company_id: str, source: str = "agro_zoom"
+) -> AgroParseResult:
+    try:
+        parsed = AgroRawCall.model_validate(raw)
+    except ValidationError as exc:
+        raise AgroParseError(f"invalid Agro raw call structure: {exc}") from exc
+
+    flags: list[str] = []
+
+    participants, participant_ids = _parse_participants(parsed.participants, flags)
+    segments, transcript_flags = _parse_transcript(parsed.transcript, participants, participant_ids)
+    for flag in transcript_flags:
+        _add_flag(flags, flag)
+
+    if not segments:
+        raise AgroParseError(f"meeting {parsed.meeting_id}: transcript has no usable segments")
+
+    if parsed.occurred_at is None:
+        raise AgroParseError(f"meeting {parsed.meeting_id}: missing occurred_at")
+    if parsed.occurred_at.tzinfo is None:
+        raise AgroParseError(f"meeting {parsed.meeting_id}: occurred_at must be timezone-aware")
+
+    duration_seconds = parsed.duration_seconds
+    if duration_seconds is None:
+        duration_seconds = max(segment["end_ts"] for segment in segments)
+        _add_flag(flags, FLAG_MISSING_DURATION)
+
+    closer_id = _resolve_closer(parsed.closer, participants, participant_ids)
+    if parsed.closer and closer_id is None:
+        _add_flag(flags, FLAG_METADATA_INCOMPLETE)
+    if parsed.transcript_source is None or parsed.zoom_summary is None or parsed.topic is None:
+        _add_flag(flags, FLAG_METADATA_INCOMPLETE)
+
+    raw_input = {
+        "company_id": company_id,
+        "source": source,
+        "source_id": parsed.meeting_id,
+        "occurred_at": parsed.occurred_at,
+        "duration_seconds": duration_seconds,
+        "closer_id": closer_id,
+        "participants": [
+            {"id": p["id"], "name": p["name"], "role": p["role"]} for p in participants
+        ],
+        "segments": segments,
+        "quality_flags": flags,
+    }
+
+    metadata = {
+        "meeting_id": parsed.meeting_id,
+        "topic": parsed.topic,
+        "transcript_source": parsed.transcript_source,
+        "zoom_summary": parsed.zoom_summary,
+        "raw_metadata": dict(parsed.metadata or {}),
+    }
+
+    return AgroParseResult(raw_input=raw_input, quality_flags=list(flags), metadata=metadata)
+
+
+def normalize_agro_call(
+    raw: dict[str, Any], *, company_id: str, source: str = "agro_zoom"
+) -> tuple[Call, AgroParseResult]:
+    result = parse_agro_call(raw, company_id=company_id, source=source)
+    call = normalize_call(result.raw_input)
+    return call, result
