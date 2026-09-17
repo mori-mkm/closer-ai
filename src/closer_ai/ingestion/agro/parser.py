@@ -54,8 +54,11 @@ FLAG_METADATA_INCOMPLETE = "metadata_incomplete"
 
 class AgroParseError(Exception):
     """Raised only when a raw Agro/Zoom call cannot become a valid `Call` at all:
-    missing/blank meeting_id, missing or non-tz-aware occurred_at, or a transcript
-    with zero usable segments. Anything else recoverable becomes a quality flag."""
+    missing/blank meeting_id, missing or non-tz-aware occurred_at, a transcript with
+    zero usable segments, or a `duration_seconds` that is present but not positive
+    (a missing duration is recoverable — see FLAG_MISSING_DURATION below — but a
+    present, invalid one is a source data error, not something to estimate around).
+    Anything else recoverable becomes a quality flag instead of raising."""
 
 
 def _add_flag(flags: list[str], flag: str) -> None:
@@ -193,6 +196,11 @@ def parse_agro_call(
         raise AgroParseError(f"meeting {parsed.meeting_id}: occurred_at must be timezone-aware")
 
     duration_seconds = parsed.duration_seconds
+    if duration_seconds is not None and duration_seconds <= 0:
+        raise AgroParseError(
+            f"meeting {parsed.meeting_id}: duration_seconds must be positive, "
+            f"got {duration_seconds!r}"
+        )
     if duration_seconds is None:
         duration_seconds = max(segment["end_ts"] for segment in segments)
         _add_flag(flags, FLAG_MISSING_DURATION)

@@ -110,3 +110,19 @@ def agro_raw_call_inconsistent_timestamps(**overrides: Any) -> dict[str, Any]:
         {"speaker": "Bruno Lima", "start": 20.0, "end": 45.0, "text": "Combinado, obrigado!"},
     ]
     return call
+
+
+def agro_raw_call_missing_participants(**overrides: Any) -> dict[str, Any]:
+    """`participants` ausente — participantes precisam ser reconstruídos a partir dos
+    speakers vistos no transcript."""
+    call = agro_raw_call(**overrides)
+    call["participants"] = None
+    return call
+
+
+def agro_raw_call_closer_not_resolved(**overrides: Any) -> dict[str, Any]:
+    """`closer` aponta para um nome que não corresponde a nenhum participante/speaker
+    conhecido na call — closer não pode ser identificado com segurança."""
+    call = agro_raw_call(**overrides)
+    call["closer"] = "Carlos Ausente Da Call"
+    return call
