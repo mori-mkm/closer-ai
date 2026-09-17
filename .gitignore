@@ -41,3 +41,9 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+# --- claude code runtime (session-local, not team config) ---
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+!.claude/agents/
+!.claude/agents/**
