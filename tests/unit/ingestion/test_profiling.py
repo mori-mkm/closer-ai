@@ -201,6 +201,39 @@ def test_parenthesized_phone_key_still_redacted(tmp_path: Path):
     assert profile.notes
 
 
+def test_uri_prefixed_phone_key_still_redacted(tmp_path: Path):
+    """Regression: "whatsapp:5511999999999" / "tel:+551199999999" — a real CRM/messaging
+    export pattern. A digit-count check (not a stripped-and-parsed regex) catches the digits
+    regardless of the alpha prefix in front of them."""
+    for prefixed in ("whatsapp:5511999999999", "whatsapp:+5511999999999", "tel:+551199999999"):
+        path = tmp_path / "attendees.json"
+        path.write_text(json.dumps({prefixed: {"role": "lead"}}), encoding="utf-8")
+
+        profile = profile_file(path)
+        rendered = _profile_as_text(profile)
+
+        assert "5511999999999" not in rendered
+        assert "551199999999" not in rendered
+        assert profile.notes
+
+
+def test_ordinary_schema_field_names_are_not_over_redacted(tmp_path: Path):
+    """The allowlist must stay usable — short numeric suffixes and typical field names should
+    survive unredacted, or the profiler stops being useful."""
+    raw = {
+        "meeting_id": "x",
+        "transcript_source": "x",
+        "call_duration_seconds": 1,
+        "segment_0001": "x",
+    }
+    path = tmp_path / "call.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    profile = profile_file(path)
+    assert set(profile.keys) == set(raw.keys())
+    assert not profile.notes
+
+
 # --- structural correctness ---
 
 

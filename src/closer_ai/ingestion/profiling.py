@@ -15,21 +15,24 @@ Design decisions worth knowing:
   this module was built for ("number of speaker identifiers" is a safe structural fact, the
   identifiers themselves are not).
 - **Key names are not automatically trusted as safe either.** A JSON object's own top-level
-  keys can themselves BE the sensitive data — e.g. `{"maria@x.com": {...}, "joao@x.com": {...}}`,
-  a participant/attendee map keyed by identity rather than a list of records. Any key (JSON or
-  CSV header) that looks like an email or a phone number — after stripping whitespace and, for
-  phones, common punctuation (spaces, dashes, parens, dots, leading `+`) — is redacted to
-  `<redacted_key_N>` before it can appear anywhere in the report (`_sanitize_keys`,
-  `_is_phone_like`). Phone matching is deliberately loose (digits-only-after-stripping, length
-  >= 7) rather than a single rigid format, because real phone keys vary more than one regex can
-  anchor to (`"(11) 98765-4321"`, `"+55 11 99999-9999"`, `"11987654321"` must all be caught) —
-  this accepts some false positives (e.g. a date-shaped key could get redacted unnecessarily)
-  in exchange for not missing an actual phone number; over-redaction only loses structural
-  detail, under-redaction leaks PII. Still a pattern-based heuristic, not a general PII
-  detector — a key that's a bare human name (e.g. `"Maria Silva": {...}`) is not caught by it.
-  Same class of known, documented gap as `MatchEvidence.detail`'s PII convention
-  (`docs/context/TECH_DEBT.md` TD-04): closes the concrete, reproducible risks found by review
-  (plain and formatted email/phone keys), does not claim to close every risk.
+  keys can themselves BE the sensitive data — e.g. `{"maria@x.com": {...}}` (identity-keyed
+  map) or `{"whatsapp:5511999999999": {...}}` (messaging-export key). Three review rounds kept
+  finding a new formatting variant (whitespace, parenthesized punctuation, a `whatsapp:`/`tel:`
+  URI prefix) that slipped past the previous round's blocklist regex — enumerating every unsafe
+  SHAPE is an open-ended, always-incomplete problem. `_looks_like_identity` (used by
+  `_sanitize_keys`) is deliberately an **allowlist**, not a blocklist: a key is trusted as a
+  schema field name only if it has no `@`, no run of 7+ digits anywhere in it (however they're
+  separated or prefixed), and contains at least one letter — an ordinary schema field name
+  (`meeting_id`, `transcript_source`) is a genuinely narrow, enumerable shape; email/phone/URI-
+  prefixed identifiers in arbitrary formatting are not. Anything that fails this check is
+  redacted to `<redacted_key_N>` before it can appear anywhere in the report. This accepts a
+  real false-positive cost (a digit-heavy but legitimate field name, e.g. a date-shaped key,
+  gets redacted unnecessarily) in exchange for not missing a real identity value —
+  over-redaction only loses structural detail, under-redaction leaks PII, not a close call for
+  this module's purpose. Still not a general PII detector: a key that's a bare human name
+  (e.g. `"Maria Silva": {...}`) is not caught, since it has letters and no digits. Same class
+  of known, documented gap as `MatchEvidence.detail`'s PII convention
+  (`docs/context/TECH_DEBT.md` TD-04).
 - Filenames are not trusted either: a real filename could itself carry PII (e.g.
   "maria_silva_call.json"). `profile_file` never puts `path.name` in the returned profile —
   only a `safe_id`, which defaults to a stable, non-reversible hash of the path unless the
@@ -46,7 +49,6 @@ import csv
 import hashlib
 import io
 import json
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -57,36 +59,31 @@ _TRANSCRIPT_KEY_HINTS = ("transcript", "segments", "entries", "utterances", "lin
 
 _SUPPORTED_EXTENSIONS = {".json", ".csv", ".txt", ".vtt", ".srt"}
 
-# A raw key/column-header that matches either of these IS the sensitive data (e.g. a
-# participant map keyed by email), not a schema field name — see module docstring. Matched
-# against the WHITESPACE-STRIPPED key, since leading/trailing whitespace is a routine artifact
-# of real exports (copy-paste, spreadsheet round-trips) and must not defeat detection.
-_EMAIL_LIKE_KEY = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_PHONE_PUNCTUATION = re.compile(r"[\s\-().+]")
+_MIN_IDENTITY_DIGIT_COUNT = 7
 
 
-def _is_phone_like(stripped_key: str) -> bool:
-    """Deliberately loose: strips common phone punctuation/whitespace (spaces, dashes,
-    parens, dots, leading +) and checks whether what's left is all digits and long enough to
-    plausibly be a phone number. A single anchored regex can't cover the real formatting
-    variance of phone numbers (parenthesized area codes like "(11) 98765-4321", dotted, etc.)
-    — this accepts a real false-positive cost (a numeric-ish schema key, e.g. a date-shaped
-    key, could get redacted unnecessarily) in exchange for not missing an actual phone number.
-    Over-redaction only loses some structural detail; under-redaction leaks PII — not a close
-    call for this module's purpose."""
-    digits_only = _PHONE_PUNCTUATION.sub("", stripped_key)
-    return digits_only.isdigit() and len(digits_only) >= 7
+def _looks_like_identity(key: str) -> bool:
+    """Allowlist check (see module docstring for why this replaced a blocklist of
+    email/phone-shaped regexes): a key is trusted as an ordinary schema field name only if it
+    has no '@', no 7+ digits anywhere in it regardless of separators/prefixes, and contains at
+    least one letter. Digit COUNT, not a contiguous run or a stripped/reformatted copy, so
+    punctuation, whitespace, and any alpha prefix (`whatsapp:`, `tel:`, ...) around the digits
+    cannot defeat it — only the raw character count matters."""
+    if "@" in key:
+        return True
+    if sum(1 for c in key if c.isdigit()) >= _MIN_IDENTITY_DIGIT_COUNT:
+        return True
+    return not any(c.isalpha() for c in key)  # pure digits/punctuation is never a field name
 
 
 def _sanitize_keys(raw_keys: list[str]) -> tuple[dict[str, str], int]:
-    """Maps every raw key to a safe-to-report name: itself, unless it looks like an email or
-    phone number, in which case it becomes a redacted placeholder. Never returns the raw key
-    for anything that matched. Returns (raw_key -> safe_key, redacted_count)."""
+    """Maps every raw key to a safe-to-report name: itself, unless `_looks_like_identity`
+    flags it, in which case it becomes a redacted placeholder. Never returns the raw key for
+    anything that matched. Returns (raw_key -> safe_key, redacted_count)."""
     mapping: dict[str, str] = {}
     redacted = 0
     for k in raw_keys:
-        candidate = k.strip()
-        if _EMAIL_LIKE_KEY.match(candidate) or _is_phone_like(candidate):
+        if _looks_like_identity(k):
             redacted += 1
             mapping[k] = f"<redacted_key_{redacted}>"
         else:
