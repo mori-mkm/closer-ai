@@ -39,9 +39,11 @@ Não criar subpastas além destas três fontes sem necessidade real — ver
 
 Quando um lote de dado real chega, registrar um manifest **sem PII** em
 `data/manifests/<dataset_id>.yaml` (este arquivo pode ser versionado — só contém metadados
-operacionais, nunca o dado em si). Template: `data/manifests/TEMPLATE.yaml`. Campos: `dataset_id`,
-`source` (agro/empreende/kommo), `received_at`, `received_from_role` (Partner Owner/Product-RevOps/
-etc.), `record_count`, `files` (nomes de arquivo, não conteúdo), `contains_pii` (sempre `true`
-para dado real), `authorization_status` (ver `docs/context/HUMAN_DECISIONS.md`), `checksum`
-(sha256 do arquivo, para detectar reenvio duplicado sem reabrir o arquivo), `notes`. Sem
-pipeline de código para isso agora — é só um template documental, preenchido manualmente.
+operacionais, nunca o dado em si). Template: `data/manifests/TEMPLATE.yaml`. Campos:
+`dataset_id`, `source` (agro/empreende/kommo), `partner`, `received_at`, `received_from_role`
+(Partner Owner/Product-RevOps/etc.), `format`, `record_count`, `files` (nomes de arquivo, não
+conteúdo), `contains_pii` (sempre `true` para dado real), `authorization_status` (ver
+`docs/context/HUMAN_DECISIONS.md`), `storage_location`, `ingestion_status`,
+`validation_status` (ver `docs/data/REAL_CALL_VALIDATION_KIT.md`), `checksum` (sha256 do
+arquivo, para detectar reenvio duplicado sem reabrir o arquivo), `known_limitations`, `notes`.
+Sem pipeline de código para isso agora — é só um template documental, preenchido manualmente.
