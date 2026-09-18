@@ -161,6 +161,46 @@ def test_csv_header_keyed_by_identity_does_not_leak_as_field_name(tmp_path: Path
     assert profile.notes
 
 
+def test_whitespace_padded_email_key_still_redacted(tmp_path: Path):
+    """Regression: a plain whitespace-stripping bypass — real exports routinely have
+    leading/trailing whitespace from copy-paste or spreadsheet round-trips."""
+    padded_email = f" {_FAKE_EMAIL} "
+    path = tmp_path / "attendees.json"
+    path.write_text(json.dumps({padded_email: {"role": "lead"}}), encoding="utf-8")
+
+    profile = profile_file(path)
+    rendered = _profile_as_text(profile)
+
+    assert _FAKE_EMAIL not in rendered
+    assert profile.notes
+
+
+def test_whitespace_padded_email_csv_header_still_redacted(tmp_path: Path):
+    path = tmp_path / "attendees.csv"
+    path.write_text(f" {_FAKE_EMAIL},role\n1,lead\n", encoding="utf-8")
+
+    profile = profile_file(path)
+    rendered = _profile_as_text(profile)
+
+    assert _FAKE_EMAIL not in rendered
+    assert profile.notes
+
+
+def test_parenthesized_phone_key_still_redacted(tmp_path: Path):
+    """Regression: "(11) 98765-4321" (standard Brazilian formatting) — a rigid digit-first
+    regex missed this because it starts with "(", not a digit."""
+    br_phone = "(11) 98765-4321"
+    path = tmp_path / "attendees.json"
+    path.write_text(json.dumps({br_phone: {"role": "lead"}}), encoding="utf-8")
+
+    profile = profile_file(path)
+    rendered = _profile_as_text(profile)
+
+    assert "98765" not in rendered
+    assert "4321" not in rendered
+    assert profile.notes
+
+
 # --- structural correctness ---
 
 
