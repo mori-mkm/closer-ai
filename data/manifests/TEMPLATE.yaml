@@ -15,7 +15,10 @@ files:
   - ""                     # nomes de arquivo recebidos (ex.: "call_001.vtt") — nunca conteúdo
 contains_pii: true          # sempre true para dado real; nunca preencher false sem revisão
 authorization_status: ""    # "UNKNOWN" | "REQUESTED" | "CONFIRMED" — ver docs/context/HUMAN_DECISIONS.md
-storage_location: ""        # caminho local gitignored, ex.: "data/raw/agro/" — nunca um caminho fora do boundary definido em data/README.md
+storage_location: ""        # URI OCI, ex.: "oci://ai-closer-private/raw/agro/agro-sample-2026-09-18/" — fonte
+                              # da verdade (ver docs/data/OCI_SHARED_STORAGE.md); o caminho local
+                              # gitignored onde a amostra foi sincronizada (ex.: "data/raw/agro/") é
+                              # efêmero/reprodutível a partir daqui, não rastreado separadamente
 ingestion_status: ""        # "NOT_STARTED" | "PROFILED" | "PARSED" | "NORMALIZED" | "FAILED"
 validation_status: ""       # "NOT_STARTED" | "IN_PROGRESS" | "PASSED" | "FAILED" — ver docs/data/REAL_CALL_VALIDATION_KIT.md
 checksum: ""                 # sha256 do(s) arquivo(s), para detectar reenvio duplicado
