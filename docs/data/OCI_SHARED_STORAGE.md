@@ -28,9 +28,10 @@ fixes exactly that gap — nothing more.
 ## Architecture
 
 One private bucket, one compartment, three IAM groups, the manifest schema the Real Call
-Validation Kit already defined (extended by four fields), and a documented CLI-based sync
-workflow. No database, no orchestration, no SDK wrapper — see "What NOT to build yet" for why
-each of those is deferred, not forgotten.
+Validation Kit already defined (unchanged in this branch — only `storage_location`'s comment
+was reworded to document it as the OCI URI), and a documented CLI-based sync workflow. No
+database, no orchestration, no SDK wrapper — see "What NOT to build yet" for why each of those
+is deferred, not forgotten.
 
 ## Bucket decision: ONE
 
@@ -61,7 +62,7 @@ Never a customer/lead name, email, or phone in any object key.
 | | One bucket + prefixes | Two buckets |
 |---|---|---|
 | Simplicity | One thing to create/monitor/quota-track | Two of everything |
-| IAM | **Viable**: OCI policies support object-name prefix conditions (`target.object.name = 'raw/crm/*'` combined with `target.bucket.name`) — confirmed against current OCI IAM docs, not assumed | Same separation, no simpler |
+| IAM | **Viable**: OCI IAM policies support object-name prefix conditions (`target.object.name = 'raw/crm/*'` combined with `target.bucket.name`) per [Oracle's Advanced Policy Features docs](https://docs.oracle.com/en-us/iaas/Content/Identity/Concepts/policyadvancedfeatures.htm), checked 2026-09-18 — the feature itself is real, but exact statement syntax should still be validated against current docs at implementation time (see policy examples below), not copy-pasted as guaranteed-correct | Same separation, no simpler |
 | Accidental cross-writes | Prevented by IAM policy, not by bucket boundary — same guarantee | Prevented by bucket boundary |
 | Lifecycle | Lifecycle rules can also be scoped by object-name prefix within one bucket | Per-bucket rules, more surface |
 | Reproducibility | One manifest namespace | Split across two |
