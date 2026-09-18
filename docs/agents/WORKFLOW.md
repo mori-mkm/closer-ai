@@ -65,6 +65,27 @@ git worktree remove ..\closer-ai-call-parser
 git branch -d feat/call-parser
 ```
 
+## CI
+
+```
+PR → CI (Ruff → pytest) → review humano → merge
+```
+
+`.github/workflows/ci.yml` roda em toda PR contra `main` (e em push em `main`, como
+confirmação pós-merge): instala o package (`pip install -e ".[dev]"`, mesmo comando de
+`README.md`), roda `ruff check .`, depois `pytest -q`. Sem secrets, sem dado real, sem rede
+externa além de checkout/instalação de pacotes — os testes são hoje 100% herméticos.
+
+**Merge só é permitido quando:**
+- CI verde (`CI / test`);
+- Ruff verde;
+- pytest verde;
+- review humano quando a mudança exigir (ver "Branches" acima);
+- nenhum dado sensível no diff.
+
+CI verde é necessário, não suficiente — não substitui o review humano nos casos já listados em
+"Branches".
+
 ## Commits
 
 Conventional Commits.
