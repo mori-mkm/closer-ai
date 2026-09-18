@@ -24,6 +24,8 @@ se precisa de aprovação humana, e se um agent consegue verificar sozinho.
 
 ## AGRO REAL READY
 
+Runbook completo para chegar aqui: [`docs/data/REAL_CALL_VALIDATION_KIT.md`](../data/REAL_CALL_VALIDATION_KIT.md).
+
 - [ ] Formato de origem documentado a partir de uma amostra real (não mais hipótese)
 - [ ] 5 calls reais processadas com sucesso pelo pipeline (`parse_agro_call` + `normalize_call`)
 - [ ] Nenhum dado bruto commitado no repositório

@@ -6,12 +6,18 @@
 
 dataset_id: ""            # ex.: "agro-sample-2026-09-18" — identificador do lote, não do conteúdo
 source: ""                 # "agro" | "empreende" | "kommo"
+partner: ""                 # ex.: "AgroTalento/BeefPoint" | "Empreende Brazil" — nome do parceiro, não do sistema
 received_at: ""            # data ISO 8601, ex.: "2026-09-18"
 received_from_role: ""     # "Partner Owner" | "Product/RevOps" | "Data/Analytics" — nunca um nome pessoal aqui
+format: ""                  # ex.: "vtt" | "json" | "csv" — formato original recebido, sem conversão
 record_count: 0             # quantidade de registros (calls ou deals), não seus conteúdos
 files:
   - ""                     # nomes de arquivo recebidos (ex.: "call_001.vtt") — nunca conteúdo
 contains_pii: true          # sempre true para dado real; nunca preencher false sem revisão
 authorization_status: ""    # "UNKNOWN" | "REQUESTED" | "CONFIRMED" — ver docs/context/HUMAN_DECISIONS.md
+storage_location: ""        # caminho local gitignored, ex.: "data/raw/agro/" — nunca um caminho fora do boundary definido em data/README.md
+ingestion_status: ""        # "NOT_STARTED" | "PROFILED" | "PARSED" | "NORMALIZED" | "FAILED"
+validation_status: ""       # "NOT_STARTED" | "IN_PROGRESS" | "PASSED" | "FAILED" — ver docs/data/REAL_CALL_VALIDATION_KIT.md
 checksum: ""                 # sha256 do(s) arquivo(s), para detectar reenvio duplicado
+known_limitations: ""       # ex.: "3 de 5 calls sem participants[].role explícito" — achados, não texto de transcript/CRM
 notes: ""                    # observações operacionais, nunca texto de transcript/CRM
