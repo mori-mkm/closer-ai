@@ -223,8 +223,12 @@ def _profile_json(raw: bytes, encoding: str) -> dict[str, Any]:
                 nested_records = [r for r in v if isinstance(r, dict)]
                 nested = _profile_json_records(nested_records)
                 extra["transcript_segment_count"] = len(v)
-                if extra.get("speaker_identifier_count") is None:
-                    extra["speaker_identifier_count"] = nested["speaker_identifier_count"]
+                # always take the nested count, never the outer 1-record one: a container key
+                # like "participants" can false-match _SPEAKER_KEY_HINTS's "participant"
+                # substring at the outer level, where there's only ever 1 "record" (the whole
+                # object) to count distinct values across — trivially always 1, meaningless.
+                # Distinct speakers only make sense across the nested per-segment entries.
+                extra["speaker_identifier_count"] = nested["speaker_identifier_count"]
                 break
         return extra
     return {"record_count": 1, "notes": ("top-level JSON value is a scalar, not an object/list",)}

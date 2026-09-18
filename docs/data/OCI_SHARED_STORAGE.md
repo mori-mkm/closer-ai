@@ -2,9 +2,13 @@
 
 Owner: Matheus. Not a data platform — the smallest shared foundation for Matheus, Gabriel, and
 Otávio to work from reproducible snapshots of real Calls/CRM data without ever putting real
-data in Git. Nothing here is provisioned yet: this is the design and runbook a human executes
-once authorization + storage decision + access review (see `docs/context/HUMAN_DECISIONS.md`)
-are all confirmed.
+data in Git.
+
+**Status: provisioned and smoke-tested with 100% synthetic data (2026-09-18)** — compartment,
+bucket, IAM groups, and budget all exist and match this design (see "IAM" and "Exact console/
+CLI setup steps" below for exactly what's done vs. still pending). No real Agro/Empreende/CRM
+data has been uploaded — that still requires authorization + storage decision + access review
+(see `docs/context/HUMAN_DECISIONS.md`) to all be separately confirmed first.
 
 ```
 Partners / Sources
@@ -82,28 +86,36 @@ people and a handful of snapshots. **Chosen: Option A.**
 
 ## IAM
 
-One compartment (`ai-closer-data`, under tenancy root — free, and the natural cost/IAM
-boundary, separate from any other OCI usage on the account) and three groups:
+**Provisioned** (verified 2026-09-18 via `oci iam compartment get`/`group list`/`policy list`,
+read-only checks, no credentials inspected). One compartment (`ai-closer`, under tenancy root)
+and three groups:
 
 ```
-oci-data-admin              (Matheus)
-oci-data-crm-contributor    (Gabriel)
-oci-data-annotation-reader  (Otávio)
+ai-closer-admins    (Matheus)  — full administration of AI Closer cloud data resources
+ai-closer-business   (Gabriel) — restricted access to CRM and business-review data
+ai-closer-ai         (Otávio)  — restricted read access to approved annotation datasets
 ```
 
-Illustrative policy statements — validate exact syntax against current OCI policy docs at
-implementation time, this is a design reference, not tested against a real tenancy:
+Only one policy exists so far — `ai-closer-object-storage-access`:
 
 ```
-Allow group oci-data-admin to manage objects in compartment ai-closer-data
-  where target.bucket.name = 'ai-closer-private'
+Allow group ai-closer-admins to manage object-family in compartment ai-closer
+```
 
-Allow group oci-data-crm-contributor to manage objects in compartment ai-closer-data
+**Known gap, confirmed by the operational smoke test**: `ai-closer-business` and `ai-closer-ai`
+have **no policy statement yet** — both groups exist but currently grant zero access (fails
+closed, not a security problem, but incomplete relative to the design below). Adding their
+scoped policies is a deliberate follow-up requiring explicit sign-off, not done automatically
+by this smoke test. Illustrative statements to add when ready — validate exact syntax against
+current OCI policy docs at that time:
+
+```
+Allow group ai-closer-business to manage objects in compartment ai-closer
   where all {target.bucket.name = 'ai-closer-private', target.object.name = 'raw/crm/*'}
-Allow group oci-data-crm-contributor to manage objects in compartment ai-closer-data
+Allow group ai-closer-business to manage objects in compartment ai-closer
   where all {target.bucket.name = 'ai-closer-private', target.object.name = 'manifests/crm/*'}
 
-Allow group oci-data-annotation-reader to read objects in compartment ai-closer-data
+Allow group ai-closer-ai to read objects in compartment ai-closer
   where all {target.bucket.name = 'ai-closer-private', target.object.name = 'curated/annotation/*'}
 ```
 
@@ -112,18 +124,23 @@ resource principals — nothing here runs as an automated service yet.
 
 ## Security
 
-- **NoPublicAccess** on the bucket — non-negotiable, verified at creation and periodically.
+- **NoPublicAccess** on the bucket — non-negotiable. Verified twice: via `oci os bucket get`
+  metadata (`public-access-type: NoPublicAccess`) and empirically, an unauthenticated `curl`
+  against both an object URL and the bucket listing URL both returned 404 (2026-09-18).
 - **Encryption at rest**: AES-256, on by default for every OCI Object Storage bucket — no
   configuration needed, confirmed against current OCI docs.
-- **Versioning**: enable on the bucket. Protects against an accidental overwrite (a re-upload
-  of the same `dataset_id` under a slightly different shape doesn't silently destroy the prior
-  snapshot) — consistent with the Real Call Validation Kit's raw-immutability principle below.
+- **Versioning**: **enabled** on the bucket (verified). Protects against an accidental
+  overwrite — proven directly: a synthetic object was deliberately overwritten, its original
+  content recovered byte-for-byte via its version-id, and restored as current, then the test's
+  extra version was purged, consistent with the Real Call Validation Kit's raw-immutability
+  principle below.
 - **Object overwrite behavior**: with versioning on, an overwrite creates a new version rather
   than destroying data; old versions still cost storage, so pair with a lifecycle rule (below).
 - **Lifecycle**: a simple rule to expire noncurrent object versions after a short window (e.g.
-  30-60 days) keeps accidental-reupload cost bounded without manual cleanup. No tiering to
-  Infrequent Access/Archive yet — the working set is small and needs to stay quickly
-  accessible during active MVP validation.
+  30-60 days) keeps accidental-reupload cost bounded without manual cleanup — **not yet
+  configured**, a real follow-up (see "Exact console/CLI setup steps"). No tiering to Infrequent
+  Access/Archive yet — the working set is small and needs to stay quickly accessible during
+  active MVP validation.
 - **Audit**: OCI Audit logging is on by default at the tenancy level for API calls (bucket/
   object operations included) — no extra setup required, just don't disable it.
 
@@ -240,25 +257,31 @@ present value (see "What NOT to build yet"). If a repeated, scriptable OCI Pytho
 becomes genuinely necessary later, `oci` (the official SDK) is the package to reach for then —
 not built preemptively.
 
-## Exact console/CLI setup steps (for whoever provisions this — not run in this session)
+## Exact console/CLI setup steps
+
+**Already executed** (compartment `ai-closer`, bucket `ai-closer-private` in `sa-saopaulo-1`,
+versioning enabled, `NoPublicAccess`, 3 IAM groups, budget with 2 alert rules — all verified
+2026-09-18 via read-only CLI checks). Kept below as the reference procedure for provisioning a
+second environment later, not a pending TODO:
 
 ```bash
 # 1. Compartment (console: Identity & Security > Compartments, or CLI)
-oci iam compartment create --name ai-closer-data --description "AI Closer shared private data" \
+oci iam compartment create --name ai-closer --description "AI Closer shared private data" \
   --compartment-id <tenancy-ocid>
 
 # 2. Bucket (Standard tier, versioning ON, NoPublicAccess is already the default — verify, don't assume)
-oci os bucket create --compartment-id <ai-closer-data-ocid> --name ai-closer-private \
+oci os bucket create --compartment-id <ai-closer-compartment-ocid> --name ai-closer-private \
   --versioning Enabled --public-access-type NoPublicAccess
 
 # 3. Lifecycle rule: expire noncurrent versions after 30 days (console is easier for this step;
-#    Object Storage > bucket > Lifecycle Policy Rules)
+#    Object Storage > bucket > Lifecycle Policy Rules) — NOT YET CONFIGURED, follow-up item.
 
-# 4. Groups + policies (console: Identity & Security > Domains > Groups, then Policies) —
-#    create the three groups above, attach the illustrative policy statements (validated
-#    against current syntax at creation time), add each person to their one group.
+# 4. Groups + policies (console: Identity & Security > Domains > Groups, then Policies) — the
+#    three groups (ai-closer-admins/ai-closer-business/ai-closer-ai) exist; only the admin
+#    group's policy is attached so far (see "IAM" above) — the other two need their scoped
+#    policy statements added before Gabriel/Otavio's accounts would have any real access.
 
-# 5. Budget (console: Billing > Cost Management > Budgets) — $1 threshold, 50%/100% alert rules.
+# 5. Budget (console: Billing > Cost Management > Budgets) — done: $1 threshold, 2 alert rules active.
 
 # 6. Prefixes are created implicitly on first upload (OCI Object Storage has no real
 #    "folders" — a prefix exists the moment an object with that prefix is written).
@@ -272,16 +295,20 @@ oci os object bulk-upload --bucket-name ai-closer-private \
   --src-dir ./local-private-staging/agro-sample-2026-09-18 \
   --object-prefix raw/agro/agro-sample-2026-09-18/
 
-# Fill data/manifests/TEMPLATE.yaml -> a local, non-committed copy at
-# manifests/agro-sample-2026-09-18.yaml, then upload the manifest itself:
+# Fill data/manifests/TEMPLATE.yaml -> data/manifests/agro-sample-2026-09-18.yaml (this IS
+# committed to Git, per data/README.md — it's metadata only, never the raw data itself), then
+# also upload it to OCI's manifests/ prefix as the durable, shared copy:
 oci os object put --bucket-name ai-closer-private \
-  --file manifests/agro-sample-2026-09-18.yaml \
+  --file data/manifests/agro-sample-2026-09-18.yaml \
   --name manifests/agro/agro-sample-2026-09-18.yaml
 
-# Sync locally for validation (gitignored path, per data/README.md):
+# Sync locally for validation (gitignored path, per data/README.md).
+# --download-dir must be "data" (the object key already starts with "raw/...") — bulk-download
+# recreates the FULL object key under --download-dir, so "data/raw/agro/" here would produce
+# the wrong nested "data/raw/agro/raw/agro/<dataset_id>/..." path. Confirmed by smoke test.
 oci os object bulk-download --bucket-name ai-closer-private \
   --prefix raw/agro/agro-sample-2026-09-18/ \
-  --download-dir data/raw/agro/
+  --download-dir data
 
 # Then continue with docs/data/REAL_CALL_VALIDATION_KIT.md's Execution Runbook, step 5 onward.
 ```

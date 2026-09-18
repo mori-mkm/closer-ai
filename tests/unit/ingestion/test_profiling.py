@@ -273,6 +273,32 @@ def test_json_single_object_with_nested_transcript_list(tmp_path: Path):
     assert profile.speaker_identifier_count == 2
 
 
+def test_top_level_participants_key_does_not_mask_nested_speaker_count(tmp_path: Path):
+    """Regression: a top-level "participants" key false-matched _SPEAKER_KEY_HINTS's
+    "participant" substring, computing a trivial (always 1) speaker count from the outer
+    1-record profile and never letting the correct nested transcript-derived count overwrite
+    it. Found via the OCI smoke test (docs/data/OCI_SHARED_STORAGE.md), using a synthetic
+    Agro-shaped call — no real data."""
+    raw = {
+        "meeting_id": "zoom-0003",
+        "participants": [
+            {"label": "Closer", "role": "closer"},
+            {"label": "Lead", "role": "lead"},
+        ],
+        "transcript": [
+            {"speaker": "Closer", "start": 0.0, "end": 1.0, "text": "oi"},
+            {"speaker": "Lead", "start": 1.0, "end": 2.0, "text": "oi"},
+            {"speaker": "Closer", "start": 2.0, "end": 3.0, "text": "tudo bem"},
+        ],
+    }
+    path = tmp_path / "call.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    profile = profile_file(path)
+    assert profile.transcript_segment_count == 3
+    assert profile.speaker_identifier_count == 2  # "Closer", "Lead" — not 1
+
+
 def test_csv_profile_reports_columns_and_row_count(tmp_path: Path):
     path = tmp_path / "deals.csv"
     path.write_text("deal_id,stage,created_at,value\nd1,open,2026-01-01,\nd2,won,2026-01-02,100\n", encoding="utf-8")
