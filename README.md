@@ -47,4 +47,5 @@ nomes, telefones, e-mails, gravações) pode ser versionado aqui — ver
 ## Como contribuir
 
 Push direto em `main` é proibido. Todo trabalho entra por Pull Request a partir de uma
-branch própria. Veja [`docs/agents/WORKFLOW.md`](docs/agents/WORKFLOW.md).
+branch própria. Toda PR roda CI (Ruff + pytest) automaticamente — ver
+[`docs/agents/WORKFLOW.md`](docs/agents/WORKFLOW.md).
