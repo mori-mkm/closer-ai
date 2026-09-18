@@ -1,0 +1,37 @@
+# Technical Debt Register
+
+Dívidas já observadas no código/docs, não um backlog especulativo. Cada item tem evidência —
+ver arquivo/doc citado. Severidade: **P0** bloqueia produção ou corrompe dado; **P1** limita
+funcionalidade real em breve; **P2** conhecido e aceito por ora; **P3** cosmético/baixo risco.
+
+| ID | Description | Impact | Severity | When to address | Blocked by | Do now? |
+|---|---|---|---|---|---|---|
+| TD-01 | Identidade de participante Agro é baseada em nome/label normalizado (`_slugify`), não em id estável da fonte (Zoom UUID, email). Colisões fundem dois participantes distintos em um só. | Speaker attribution errada silenciosamente funde pessoas diferentes no pipeline Agro. | P1 | Quando o formato real do Zoom for confirmado (pode já trazer um id estável, resolvendo isto de graça). | Acesso ao formato real de origem. | Não — sem dado real não há como saber se o problema existe de fato nessa escala. |
+| TD-02 | `participant_id_collision` (flag do TD-01) é sinalizada, mas não resolvida — a fusão acontece mesmo com a flag presente. | Mesmo com a flag, o dado fundido já está no `Call` resultante. | P1 | Mesma dependência do TD-01. | TD-01 | Não |
+| TD-03 | Formato bruto do Agro (`AgroRawCall`) não validado contra nenhum export real — todo campo é hipótese documentada (`docs/domain/AGRO_INGESTION_CONTRACT.md`). | Parser pode rejeitar ou interpretar mal o formato real assim que chegar. | P1 | Assim que houver acesso a uma amostra real. | Acesso ao corpus Agro. | Não — é o próximo passo natural quando o dado chegar, não algo a "consertar" agora sem saber o que consertar. |
+| TD-04 | `MatchEvidence.detail` é uma convenção de "nunca PII", não enforced por schema/regex. | Um caller descuidado pode colocar email/telefone real em texto livre de evidência de match. | P1 | Antes de qualquer matching rodar contra dado real (Kommo). | Nenhum — pode ser endereçado agora se decidirmos o custo de falso positivo/negativo de um detector heurístico. | Considerar antes do CRM READY gate, não antes. |
+| TD-05 | Invariantes duplicados entre `ingestion/agro/parser.py` e `normalization/models.py` (`end>start`, texto não-vazio, tz-aware, duration>0) — checados duas vezes, sem fonte única. | Se `models.py` mudar uma regra, `parser.py` pode divergir silenciosamente (sem teste quebrando). | P2 | Quando a segunda fonte de ingestão (Empreende Brazil) for construída — nesse ponto vale extrair um helper compartilhado. | Nenhum | Não — YAGNI com uma única fonte de ingestão hoje. |
+| TD-06 | `_slugify`/`_add_flag` são privados ao módulo `ingestion/agro/`; a segunda fonte (Empreende) provavelmente copiaria em vez de importar. | Duplicação de código quando Empreende ingestion começar. | P2 | No início do trabalho de ingestão Empreende. | Início da ingestão Empreende | Não |
+| TD-07 | `Deal.current_stage` não tem cross-check automático contra o `StageEvent` de `occurred_at` mais recente — depende do write path (storage) garantir isso atomicamente, e `storage/` está vazio. | Uma escrita incorreta pode deixar `current_stage` inconsistente com o histórico sem nenhum erro. | P2 | Quando a camada de storage for desenhada. | `storage/` não existe ainda | Não |
+| TD-08 | `confidence_score` vs. `confidence_level` para métodos heurísticos de matching não tem cross-check (nada impede `score=0.1` com `level='high'`) — só o método determinístico (`exact_external_id`) existe hoje e é forçado a `level='high'`/`score=None`. | Sem impacto real ainda (não existe método heurístico implementado); vira risco assim que um existir. | P2 | Quando o primeiro matcher heurístico for implementado. | Nenhum matcher heurístico existe ainda | Não |
+| TD-09 | Máximo de uma linha `status='matched'` por `call_id` não é impedido estruturalmente — depende de constraint de unicidade em nível de storage/aplicação, que não existe. | Sem storage layer, o risco é teórico hoje; vira real assim que houver persistência real. | P2 | Quando `storage/` for desenhado. | `storage/` não existe ainda | Não |
+| TD-10 | `Deal.value`/`Deal.currency` usam `float`, não `Decimal`. | Risco de precisão monetária em agregações futuras (soma de valores de deals). | P2 | Antes de qualquer agregação financeira em `analytics/`. | Nenhum | Não — aceito explicitamente na v0 do Deal model. |
+| TD-11 | GitHub Actions pinadas por major tag (`actions/checkout@v4`, `actions/setup-python@v5`), não por SHA. | Uma tag major pode, em teoria, apontar para um commit diferente do esperado (supply-chain, baixo risco para actions oficiais de primeira parte). | P3 | Se a política de segurança do projeto exigir pinning por SHA. | Nenhum | Não |
+| TD-12 | Branch protection / required status checks no GitHub não verificável localmente nesta sessão. | Sem confirmação, o CI pode não estar de fato bloqueando merge direto. | P1 (até confirmar) | Imediato — é uma checagem manual de 2 minutos no GitHub, não trabalho de engenharia. | Acesso autenticado ao `gh`/GitHub UI | Sim — verificar manualmente, não é trabalho de código. |
+| TD-13 | Golden Set de objeções é 100% sintético (9 exemplos, um único autor, sem dupla anotação). | Métricas do eval (precision/recall) não têm validade fora do universo sintético que o próprio autor desenhou. | P1 | Quando o Golden Set real (`docs/context/EXECUTION_GATES.md` — GOLDEN SET READY) for construído. | Acesso ao corpus real + anotadores | Não |
+
+## Itens do prompt sem evidência de dívida real hoje
+
+- **`AgroParseResult.quality_flags` duplica `raw_input["quality_flags"]`** — redundância de
+  baixo risco já documentada em `docs/domain/AGRO_INGESTION_CONTRACT.md` como aceita, não
+  vale reabrir como item separado (já coberto pelo espírito de TD-05/TD-06: revisitar quando a
+  segunda fonte de ingestão existir).
+- **CI actions por major tag** — coberto como TD-11.
+- **Cross-row matching invariants sem storage layer** — coberto como TD-09.
+- **`current_stage` vs. `StageEvent` consistency** — coberto como TD-07.
+
+## Não incluído de propósito
+
+Este registro não vira backlog infinito. Itens especulativos sem evidência concreta no código
+atual (ex. "e se precisarmos de multi-tenancy hardening", "e se o LLM provider mudar") não
+entram aqui — entram em `docs/product/ROADMAP.md` quando/se se tornarem reais.
