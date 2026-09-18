@@ -17,6 +17,9 @@ disponível localmente — ver `docs/context/CURRENT_STATE.md`):
   estável da fonte (Zoom participant UUID, e-mail) — ver "Known limitations".
 - Formato exato do transcript (`speaker`/`start`/`end`/`text` por entrada) não confirmado —
   pode ser `.vtt`, `.srt`, JSON de API, ou outra coisa.
+- Resolução de `role="lead"` assumida como disponível via `participants[].role` explícito na
+  fonte — não confirmado que o Zoom/Agro real forneça essa informação (ver TD-14 em "Known
+  limitations"). Sem ela, `role` permanece `"unknown"` para participantes não-closer.
 - Corpus real (108 calls Beefpoint/AgroTalento) ainda não processado por este pipeline.
 
 ## What this implementation DOES NOT claim
@@ -90,6 +93,7 @@ comportamento como intencional.
 | `transcript_parse_error` | entrada de transcript não é mapping, `text` ausente/vazio/tipo errado, ou `end<=start` | sim — entrada descartada | idem `missing_timestamp` | `missing_timestamp`, `empty_transcript` | `agro_raw_call_inconsistent_timestamps()` | origem |
 | `metadata_incomplete` | `topic`/`transcript_source`/`zoom_summary` ausente, OU `closer` informado mas não resolvido (ou resolvido a alguém com role conflitante) | sim — puramente informativo | nenhum | qualquer outra | `agro_raw_call_incomplete_metadata()` | origem |
 | `participant_id_collision` | dois labels de origem diferentes (participants entre si, ou transcript vs. participants) normalizam para o mesmo `_slugify()` | sim — o primeiro registrado "vence", o resto é só sinalizado | um participante da fonte pode desaparecer/ter sua fala misatribuída ao vizinho — ver "Known limitations" | `unresolved_speaker` | ver teste `test_parse_agro_call_participant_slug_collision_is_flagged_not_silent` | interpretação (limitação do próprio esquema de id) |
+| `unresolved_lead` (TD-14) | a call tem pelo menos um segmento utilizável, mas nenhum participante resolveu `role="lead"` | sim — puramente informativo; `role` permanece `"unknown"` para o(s) participante(s) não-closer | `RuleBasedObjectionExtractor` (`src/closer_ai/ai/objection_extraction.py`) só escaneia segmentos `role="lead"` — sem essa flag, zero eventos extraídos é indistinguível de "não houve objeção" | qualquer outra | ver testes em `tests/unit/ingestion/agro/test_parser.py` (seção "TD-14") e `tests/integration/test_agro_to_objection_extraction.py` | origem — o parser nunca infere `lead` por topologia (closer + 1 outro participante), só por evidência explícita já presente em `participants[].role`; ver "Known limitations" |
 
 Duas flags foram auditadas e achadas **não** escondendo dois estados semanticamente diferentes
 sob o mesmo nome, apesar de suspeita inicial:
@@ -103,6 +107,20 @@ sob o mesmo nome, apesar de suspeita inicial:
 
 ## Known limitations
 
+- **Resolução de `role="lead"` (TD-14)**: `_resolve_closer` tem um mecanismo explícito de
+  resolução; **não existe equivalente para `lead`**. Todo participante não-closer permanece
+  `role="unknown"` a menos que a fonte bruta já traga `"role": "lead"` explícito em
+  `participants[]` (evidência real, passada adiante sem alteração — não é inferência). Uma
+  hipótese testada e **rejeitada** por revisão adversarial (Domain Agent + AI Engineer +
+  Evaluator, independentemente): "closer resolvido + exatamente um outro participante ⇒ esse
+  outro é o lead". Rejeitada porque a mesma topologia (closer + 1 outro participante) também
+  ocorre em call de shadow/QA com gerente, handoff de SDR sem o lead ainda na call, call de
+  treinamento entre funcionários, ou closer + consultor/parceiro — nenhum desses é o lead, e
+  a inferência os rotularia com `role="lead"` **confiante** (não `"unknown"`), o que é pior que
+  o bug original: silenciosamente errado, não silenciosamente vazio. Mitigação adotada: a flag
+  `unresolved_lead` torna o gap diagnosticável sem fabricar identidade. Resolver de verdade
+  exige evidência real da fonte (campo de role explícito confirmado) ou match de identidade via
+  CRM — trabalho de um adapter de fonte real futuro, não inventado aqui.
 - **Colisão de id de participante** (`participant_id_collision`): a identidade de participante
   é derivada só do nome/label normalizado (`_slugify` — NFKD, minúsculas, ascii). Dois nomes
   que normalizam igual (ex. "João Silva" vs. "Joao Silva", ou diferença só de maiúsculas/
