@@ -225,3 +225,34 @@ def test_stage_event_id_stable_across_equivalent_utc_offsets():
 def test_stage_event_rejects_naive_occurred_at():
     with pytest.raises(ValidationError):
         _stage_event(occurred_at=datetime(2026, 1, 10, 12, 0))  # noqa: DTZ001 - naive on purpose
+
+
+def test_stage_event_out_of_order_delivery_is_representable():
+    """Case 12 from the task's invariant list. A stage earlier in the funnel arriving with a
+    LATER occurred_at than an already-recorded, more-advanced stage is not rejected here — by
+    design (see deal.py's module docstring), keeping Deal.current_stage in sync with the
+    latest StageEvent is a write-path responsibility this model can't see across rows."""
+    deal_id = derive_deal_id("agrotalento-001", "kommo", "deal-1")
+    advanced = _stage_event(deal_id=deal_id, stage="negotiation", occurred_at=_CREATED_AT)
+    earlier_stage_late_arrival = _stage_event(
+        deal_id=deal_id, stage="qualification", occurred_at=_CREATED_AT + timedelta(days=2)
+    )
+    assert advanced.stage_event_id != earlier_stage_late_arrival.stage_event_id
+
+
+# --- documented gaps (Evaluator, hardening round) ---
+
+
+def test_deal_currency_requires_non_blank_string():
+    with pytest.raises(ValidationError):
+        _deal(value=1000.0, currency="   ")
+
+
+def test_deal_silently_ignores_unknown_fields():
+    """Documents current, deliberate behavior (Pydantic default `extra='ignore'`, not
+    `'forbid'`) rather than leaving it as an unstated accident — same choice already made for
+    AgroRawCall (see docs/domain/AGRO_INGESTION_CONTRACT.md): a future real CRM field this
+    contract doesn't model yet should not break ingestion. The cost is that a caller typo in an
+    optional field name (e.g. `meta_data=` instead of `metadata=`) is silently absorbed."""
+    deal = _deal(totally_unknown_field="surprise")
+    assert not hasattr(deal, "totally_unknown_field")

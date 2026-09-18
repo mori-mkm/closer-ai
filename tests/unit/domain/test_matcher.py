@@ -86,3 +86,15 @@ def test_matcher_never_raises_on_no_match():
     results = ExactExternalIdMatcher().match(call, [_deal(external_id="x"), _deal(external_id="y")])
     assert len(results) == 1
     assert results[0].status == "unmatched"
+
+
+def test_duplicate_deal_id_candidates_do_not_produce_false_ambiguity():
+    # a caller passing the same deal twice (e.g. a duplicated upstream join) must never be
+    # treated as two distinct plausible candidates — that would be false ambiguity from a
+    # caller bug, the mirror image of "silently pick a winner" this contract exists to prevent
+    call = _call(source_id="synth-call-0001")
+    deal = _deal(external_id="synth-call-0001")
+    results = ExactExternalIdMatcher().match(call, [deal, deal])
+    assert len(results) == 1
+    assert results[0].status == "matched"
+    assert results[0].deal_id == deal.deal_id

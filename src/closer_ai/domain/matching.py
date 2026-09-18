@@ -227,7 +227,17 @@ class ExactExternalIdMatcher:
 
     def match(self, call: Call, candidates: list[Deal]) -> list[CallDealMatch]:
         created_at = datetime.now(UTC)
-        matches = [deal for deal in candidates if deal.external_id == call.source_id]
+        # dedupe by deal_id first: a caller passing the same deal twice (e.g. a duplicated
+        # join upstream) is not two distinct candidates and must never look like ambiguity —
+        # that would be exactly the "false ambiguity from a caller bug" failure mode, the
+        # mirror image of the "silently pick a winner" one this whole contract exists to
+        # prevent.
+        seen_deal_ids: set[str] = set()
+        matches: list[Deal] = []
+        for deal in candidates:
+            if deal.external_id == call.source_id and deal.deal_id not in seen_deal_ids:
+                seen_deal_ids.add(deal.deal_id)
+                matches.append(deal)
 
         if not matches:
             return [

@@ -280,3 +280,60 @@ def test_call_deal_match_frozen():
 def test_call_deal_match_rejects_naive_created_at():
     with pytest.raises(ValidationError):
         _match(created_at=datetime(2026, 2, 1, 9, 0))  # noqa: DTZ001 - naive on purpose
+
+
+# --- documented gaps (Evaluator, hardening round): not bugs, not fixed here, but must not
+# --- be silently "fixed" or forgotten without a discussion, since a test currently locks
+# --- the behavior in either direction ---
+
+
+def test_heuristic_score_and_level_can_structurally_contradict():
+    """Known, documented gap (see matching.py module docstring and DEAL_MODEL.md): nothing
+    cross-checks confidence_score against confidence_level for heuristic methods. Calibrating
+    that correctly is the matching algorithm's (write path's) responsibility, deliberately not
+    hardcoded here. This test documents today's actual behavior so it isn't silently changed
+    without discussion."""
+    match = _match(
+        matching_method="name_only",
+        confidence_level="high",
+        confidence_score=0.1,
+        status="manual_review",
+    )
+    assert match.confidence_level == "high"
+    assert match.confidence_score == 0.1
+
+
+def test_other_method_is_treated_as_heuristic_not_deterministic():
+    match = _match(
+        matching_method="other",
+        confidence_level="high",
+        confidence_score=0.1,
+        status="manual_review",
+        evidence=[_evidence(signal="other")],
+    )
+    assert match.confidence_score == 0.1  # not forced to None like a deterministic method
+
+
+def test_same_call_matched_to_same_deal_twice_is_representable():
+    """Case 7 from the task's invariant list: nothing at this level deduplicates two attempts
+    that both land on status='matched' for the same (call_id, deal_id) — e.g. two different
+    methods agreeing, or a re-run. "Which matched row is the current one" is a query
+    responsibility (latest by created_at), documented in the module docstring, not something
+    this model enforces."""
+    from datetime import timedelta
+
+    first_created_at = _CREATED_AT
+    second_created_at = _CREATED_AT + timedelta(days=1)
+    first = _match(created_at=first_created_at)
+    second = _match(
+        matching_method="manual",
+        created_at=second_created_at,
+        evidence=[_evidence(signal="human_decision")],
+        call_deal_match_id=derive_call_deal_match_id(
+            "call_1", _DEAL_ID, "manual", second_created_at
+        ),
+    )
+    assert first.call_id == second.call_id
+    assert first.deal_id == second.deal_id
+    assert first.status == second.status == "matched"
+    assert first.call_deal_match_id != second.call_deal_match_id

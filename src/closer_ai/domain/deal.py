@@ -150,7 +150,7 @@ class Deal(BaseModel):
         if self.value is not None:
             if self.value < 0:
                 raise ValueError("value must not be negative")
-            if self.currency is None:
+            if self.currency is None or not self.currency.strip():
                 raise ValueError("currency is required when value is set")
 
         return self
