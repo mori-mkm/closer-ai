@@ -6,6 +6,22 @@ real ou processo real, não só cobertura de teste. Nenhum gate abaixo está fec
 (2026-09-18); ver `docs/context/CURRENT_STATE.md` para o que já está implementado no nível de
 código.
 
+## Data acceptance gates (onboarding sequence)
+
+Gates finos que precedem os gates de camada abaixo — a ordem em que os dados reais devem
+avançar, do primeiro contato até virar insumo de contrato. Cada linha tem evidência exigida,
+se precisa de aprovação humana, e se um agent consegue verificar sozinho.
+
+| Gate | Required evidence | Human approval? | Agent-verifiable? | Output artifact |
+|---|---|---|---|---|
+| DATASET RECEIVED | Arquivos presentes em `data/raw/<fonte>/`, fora do Git | Não | Sim (checar existência do arquivo local) | Nenhum — é um estado, não um documento |
+| DATASET AUTHORIZED | Confirmação registrada de que o uso do dado foi autorizado pelo parceiro | Sim — é a decisão em `docs/context/HUMAN_DECISIONS.md` | Não | Entrada atualizada em `docs/context/OPEN_QUESTIONS.md`/`HUMAN_DECISIONS.md` |
+| SOURCE FORMAT UNDERSTOOD | `docs/data/SOURCE_CONTRACT_DIFF_TEMPLATE.md` preenchido para os campos relevantes | Não (revisão opcional) | Sim, uma vez que o dado exista localmente | Diff preenchido + `docs/domain/AGRO_INGESTION_CONTRACT.md` atualizado |
+| 5-CALL VALIDATION PASSED | `docs/data/FIRST_CALLS_VALIDATION.md` executado até o passo 20 (quality report), incluindo a confirmação crítica do passo 13 (resolução de `role="lead"` ponta a ponta — sem isso o extractor produz zero objeções silenciosamente) | Sim, passo 21 (review before batch) | Passos 1-20 sim; passo 21 não | Quality report (`docs/data/DATA_QUALITY_REPORT.md`, seção Calls) |
+| CRM SEMANTICS VALIDATED | `docs/data/KOMMO_DISCOVERY.md` executado, semântica de stage/outcome confirmada com o negócio | Sim — semântica de negócio não é inferível pelo agent | Só a parte de shape da API; semântica não | Documento de achados do Kommo Discovery |
+| MATCHING SIGNALS IDENTIFIED | `docs/data/DATA_ACCESS_MATRIX.md` (tabela de sinais) atualizada com "currently available" real, não mais "unknown until sample" | Não | Sim, uma vez que Agro+Kommo estejam validados | `DATA_ACCESS_MATRIX.md` atualizado |
+| GOLDEN SET READY | Ver seção própria abaixo | Sim | Parcial — só a contagem de calls selecionadas e o cálculo do número de agreement são mecânicos; escolha de anotadores, limiar de agreement aceitável, dupla anotação e adjudicação são decisões/trabalho humano (`docs/context/HUMAN_DECISIONS.md`) | `evals/objection_v0/` real (fora do escopo desta task) |
+
 ## AGRO REAL READY
 
 - [ ] Formato de origem documentado a partir de uma amostra real (não mais hipótese)
@@ -73,3 +89,23 @@ código.
       como se fossem "não convertidos"
 - [ ] Nenhuma alegação causal a partir de dado observacional — correlação reportada como
       correlação, sem linguagem de causalidade
+
+## BATCH READINESS (antes de processar as 108/35 calls reais)
+
+Checklist antes de rodar o corpus completo — mesmo em execução manual, não só pipeline
+automatizado:
+
+- [ ] Autorização confirmada (`docs/context/HUMAN_DECISIONS.md`)
+- [ ] Contrato de origem validado (gate SOURCE FORMAT UNDERSTOOD acima)
+- [ ] 5 calls passaram na validação (gate 5-CALL VALIDATION PASSED acima)
+- [ ] Distribuição de `quality_flags` das 5 calls revisada e aceitável
+- [ ] IDs determinísticos verificados (mesmo input produz mesmo `call_id`/`segment_id` — checar
+      re-execução idempotente antes do batch)
+- [ ] Caminho de dado bruto está no `.gitignore` (`data/raw/**`)
+- [ ] Nenhum log/exceção do pipeline imprime PII (mensagens de erro citam só `meeting_id`,
+      nunca conteúdo de transcript — ver convenção já em `parse_agro_call()`)
+- [ ] Output vai para caminho privado (`data/interim/`/`data/processed/private/`), nunca
+      staged para commit
+- [ ] Rollback/re-execução é seguro (rodar o batch de novo não duplica nem corrompe nada —
+      decorre dos IDs determinísticos, mas confirmar antes)
+- [ ] Relatório de qualidade pronto para ser gerado ao final do batch (`docs/data/DATA_QUALITY_REPORT.md`)

@@ -79,6 +79,29 @@ Um agente que encontra ambiguidade de contrato, decisão de produto ou dependên
 resolvida **para e reporta ao Lead** — não assume premissa silenciosamente (regra já em
 [`AGENTS.md`](../../AGENTS.md)). O Lead decide se resolve, escala ao humano, ou ajusta a task.
 
+## Modo dado real (quando as primeiras amostras chegarem)
+
+Mesmo grafo de responsabilidades de sempre (ver tabela acima), com uma regra adicional
+específica para dado real — ver `docs/data/PRIVACY_BOUNDARY.md` e
+`docs/context/HUMAN_DECISIONS.md` para o contexto completo:
+
+- **Domain Agent** revisa o mapeamento source→domínio e a lineage (`docs/data/SOURCE_CONTRACT_DIFF_TEMPLATE.md`,
+  `docs/context/DATA_DEPENDENCIES.md`), nunca implementa o adapter.
+- **AI Engineer** avalia compatibilidade do dado recebido com a extração/eval existente
+  (`docs/data/DATA_QUALITY_REPORT.md`), nunca decide se o dado está autorizado.
+- **Evaluator** revisa amostragem e qualidade de dado para o Golden Set
+  (`docs/evals/GOLDEN_SET_SAMPLING.md`), nunca anota o golden set sozinho.
+- **Reviewer** audita privacidade, escopo e correção — nunca aprova uso de dado sem
+  autorização confirmada em `docs/context/HUMAN_DECISIONS.md`.
+
+**Regra fixa: agents nunca recebem um dataset bruto mais amplo do que o necessário para a
+tarefa.** Preferir sempre uma amostra pequena (as 5/3-5/20-50 de
+`docs/data/REAL_DATA_REQUEST.md`) a passar o corpus completo para um agent processar de uma
+vez — mesmo depois que o corpus completo estiver disponível. Isso não é infraestrutura de
+RBAC (não implementamos controle de acesso automatizado) — é só disciplina de processo: o Lead
+decide o que cada agent recebe, task por task, do mesmo jeito que já decide "Allowed files" em
+`docs/agents/TASK_TEMPLATE.md`.
+
 ## Review e human-in-the-loop
 
 Reviewer nunca faz merge. Toda mudança produzida por agente passa por PR e review humano antes
