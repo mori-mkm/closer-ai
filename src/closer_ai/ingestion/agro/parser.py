@@ -244,7 +244,12 @@ def parse_agro_call(
         # of which could put source content in an exception message meant to be safe
         # to log (see docs/domain/AGRO_INGESTION_CONTRACT.md — no PII in logs).
         fields = ", ".join(".".join(str(part) for part in error["loc"]) for error in exc.errors())
-        raise AgroParseError(f"invalid Agro raw call structure (fields: {fields})") from exc
+        # `from None`, not `from exc`: keeping the pydantic ValidationError as
+        # __cause__ would still let it leak (rejected field value + errors.pydantic.dev
+        # URL) through any full-traceback log (traceback.print_exc(),
+        # logging.exception()) even though the message above is clean — the "safe to
+        # log" contract has to hold for the whole exception, not just str(this).
+        raise AgroParseError(f"invalid Agro raw call structure (fields: {fields})") from None
 
     flags: list[str] = []
 
@@ -308,14 +313,17 @@ def normalize_agro_call(
     result = parse_agro_call(raw, company_id=company_id, source=source)
     try:
         call = normalize_call(result.raw_input)
-    except ValidationError as exc:
+    except ValidationError:
         # Defense-in-depth, not the primary contract: parse_agro_call() already
         # guards the invariants it knows about (span, text, tz-awareness, duration),
         # but participants[].role comes straight from an untyped source field and is
         # only validated by Call's own Literal — this is the one remaining path a
         # pydantic.ValidationError could otherwise leak through undocumented.
+        # `from None` for the same reason as the shape-validation catch above: don't
+        # keep a ValidationError around as __cause__ that a full-traceback log could
+        # still print.
         raise AgroParseError(
             f"meeting {result.metadata['meeting_id']}: parsed input rejected by "
             f"normalize_call()"
-        ) from exc
+        ) from None
     return call, result

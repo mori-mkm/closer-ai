@@ -426,3 +426,27 @@ def test_normalize_agro_call_invalid_participant_role_raises_agro_parse_error_no
     with pytest.raises(AgroParseError) as exc_info:
         normalize_agro_call(raw, company_id=COMPANY_ID)
     assert "pydantic" not in str(exc_info.value).lower()
+
+
+# --- hardening round: no leaking ValidationError even via the exception chain ---
+#
+# A clean str(exc) is not enough on its own: `raise ... from exc` keeps the original
+# pydantic.ValidationError as __cause__, and anything that logs a full traceback
+# (traceback.print_exc(), logging.exception()) would still print it — including the
+# rejected field value and the errors.pydantic.dev URL. Both AgroParseError sites that
+# wrap a ValidationError use `from None` specifically to close this.
+
+
+def test_parse_agro_call_shape_error_does_not_keep_validation_error_as_cause():
+    raw = agro_raw_call(occurred_at="not-a-date")
+    with pytest.raises(AgroParseError) as exc_info:
+        parse_agro_call(raw, company_id=COMPANY_ID)
+    assert exc_info.value.__cause__ is None
+
+
+def test_normalize_agro_call_role_error_does_not_keep_validation_error_as_cause():
+    raw = agro_raw_call()
+    raw["participants"][0]["role"] = "not_a_real_role"
+    with pytest.raises(AgroParseError) as exc_info:
+        normalize_agro_call(raw, company_id=COMPANY_ID)
+    assert exc_info.value.__cause__ is None
