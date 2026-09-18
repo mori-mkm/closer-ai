@@ -41,6 +41,17 @@ transcript with zero usable segments). Quality flags:
   participant UUID, email, ...) — see docs/domain/AGRO_INGESTION_CONTRACT.md. This
   flag makes the resulting merge/attribution visible for manual triage; it does not
   (and, without a stable id from the real source, cannot safely) resolve it.
+- unresolved_lead (TD-14): the call has at least one usable transcript segment, but no
+  participant resolved to role="lead". This parser deliberately never infers "lead" from
+  topology (e.g. "the one non-closer participant must be the lead") — a real call can have
+  an SDR, an internal manager, an observer, or multiple buyers alongside the actual lead, and
+  guessing would fabricate a false attribution (see docs/context/TECH_DEBT.md TD-14 and the
+  adversarial review that rejected topology-based inference). `role="lead"` is only ever set
+  by explicit source evidence already present in `participants[].role` — this flag exists so
+  that "zero objections extracted" (RuleBasedObjectionExtractor only scans role="lead"
+  segments) is diagnosable as "lead role unresolved" rather than misread as "no objection
+  happened". Resolving it for real requires either explicit role evidence from a real source
+  adapter or a CRM-backed identity match — both future work, not guessed here.
 
 All flags end up in `AgroParseResult.raw_input["quality_flags"]`, so they flow
 straight into `Call.quality_flags` via the existing mechanism — no schema change.
@@ -66,6 +77,7 @@ FLAG_MISSING_DURATION = "missing_duration"
 FLAG_TRANSCRIPT_PARSE_ERROR = "transcript_parse_error"
 FLAG_METADATA_INCOMPLETE = "metadata_incomplete"
 FLAG_PARTICIPANT_ID_COLLISION = "participant_id_collision"
+FLAG_UNRESOLVED_LEAD = "unresolved_lead"
 
 
 class AgroParseError(Exception):
@@ -281,6 +293,14 @@ def parse_agro_call(
         _add_flag(flags, FLAG_METADATA_INCOMPLETE)
     if parsed.transcript_source is None or parsed.zoom_summary is None or parsed.topic is None:
         _add_flag(flags, FLAG_METADATA_INCOMPLETE)
+
+    # TD-14: never infer "lead" from participant topology (e.g. closer + exactly one other
+    # participant) — a real call can have an SDR, manager, observer, or multiple buyers
+    # alongside the lead, and guessing would fabricate a false attribution. Only explicit
+    # source evidence already present in participants[].role can set role="lead" (see
+    # _parse_participants). This flag makes the gap visible instead of silent.
+    if not any(p["role"] == "lead" for p in participants):
+        _add_flag(flags, FLAG_UNRESOLVED_LEAD)
 
     raw_input = {
         "company_id": company_id,

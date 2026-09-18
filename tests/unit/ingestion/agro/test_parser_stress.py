@@ -124,3 +124,31 @@ def normalize_call_or_fail(raw: dict[str, Any], index: int):
             f"normalize_agro_call() rejected it — the two disagree"
         ) from None
     return call
+
+
+def test_agro_parser_never_infers_lead_role_across_participant_counts():
+    """TD-14 invariant: regardless of how many non-closer participants a call has (0..5),
+    none of them may be silently promoted to role="lead" without explicit source evidence
+    (participants[].role already set to "lead" by the source itself)."""
+    for n in (0, 1, 2, 3, 5):
+        others = [f"Participante {i}" for i in range(n)]
+        participants = [{"label": "Closer Pessoa"}] + [{"label": name} for name in others]
+        transcript = [
+            {"speaker": "Closer Pessoa", "start": 0.0, "end": 5.0, "text": "Abertura da call."}
+        ] + [
+            {"speaker": name, "start": 5.0 + i, "end": 6.0 + i, "text": f"Fala de {name}."}
+            for i, name in enumerate(others)
+        ]
+        raw: dict[str, Any] = {
+            "meeting_id": f"stress-lead-{n}",
+            "occurred_at": datetime(2026, 1, 1, 10, 0, tzinfo=UTC),
+            "duration_seconds": 60.0,
+            "closer": "Closer Pessoa",
+            "participants": participants,
+            "transcript": transcript,
+        }
+        result = parse_agro_call(raw, company_id=COMPANY_ID)
+        assert not any(p["role"] == "lead" for p in result.raw_input["participants"]), (
+            f"N={n}: a participant was silently promoted to role='lead' with no explicit evidence"
+        )
+        assert "unresolved_lead" in result.quality_flags, f"N={n}: missing unresolved_lead flag"

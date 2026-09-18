@@ -450,3 +450,86 @@ def test_normalize_agro_call_role_error_does_not_keep_validation_error_as_cause(
     with pytest.raises(AgroParseError) as exc_info:
         normalize_agro_call(raw, company_id=COMPANY_ID)
     assert exc_info.value.__cause__ is None
+
+
+# --- TD-14: unresolved_lead flag — no participant resolves to role="lead" ---
+#
+# `_resolve_closer` has an explicit resolution mechanism; there is deliberately no
+# equivalent `_resolve_lead`. Real calls can have an SDR, internal manager, observer, or
+# multiple buyers alongside the closer, so "the one non-closer participant is the lead" is
+# not a safe inference (see docs/context/TECH_DEBT.md TD-14) — these tests lock in that the
+# parser never makes that guess, and instead raises a diagnosable flag.
+
+
+def _two_party_no_explicit_role(**overrides):
+    """closer + exactly one other participant, neither tagged with an explicit role —
+    the shape that used to silently break RuleBasedObjectionExtractor (TD-14)."""
+    raw = agro_raw_call()
+    raw["participants"] = [{"label": "Joao"}, {"label": "Maria"}]
+    raw["transcript"] = [
+        {"speaker": "Joao", "start": 0.0, "end": 5.0, "text": "Como você está pensando em seguir?"},
+        {"speaker": "Maria", "start": 5.5, "end": 10.0, "text": "Está muito caro para mim."},
+    ]
+    raw.update(overrides)
+    return raw
+
+
+def test_parse_agro_call_flags_unresolved_lead_when_no_explicit_lead_role():
+    result = parse_agro_call(_two_party_no_explicit_role(), company_id=COMPANY_ID)
+    assert "unresolved_lead" in result.quality_flags
+
+
+def test_parse_agro_call_does_not_infer_lead_from_two_party_topology():
+    """Regression guard: closer + exactly one other participant must NOT be promoted to
+    role='lead' just because there are exactly two participants."""
+    result = parse_agro_call(_two_party_no_explicit_role(), company_id=COMPANY_ID)
+    maria = next(p for p in result.raw_input["participants"] if p["id"] == "maria")
+    assert maria["role"] == "unknown"
+
+
+def test_parse_agro_call_flags_unresolved_lead_with_multiple_unknown_participants():
+    """Closer + 2 unresolved participants: neither is promoted, flag still fires."""
+    raw = agro_raw_call()
+    raw["participants"] = [{"label": "Joao"}, {"label": "Maria"}, {"label": "Pedro"}]
+    raw["transcript"] = [
+        {"speaker": "Joao", "start": 0.0, "end": 5.0, "text": "Vamos começar."},
+        {"speaker": "Maria", "start": 5.0, "end": 10.0, "text": "Está muito caro."},
+        {"speaker": "Pedro", "start": 10.0, "end": 15.0, "text": "Não tenho orçamento."},
+    ]
+    result = parse_agro_call(raw, company_id=COMPANY_ID)
+    assert not any(p["role"] == "lead" for p in result.raw_input["participants"])
+    assert "unresolved_lead" in result.quality_flags
+
+
+def test_parse_agro_call_flags_unresolved_lead_when_closer_not_resolved():
+    """No lead must be inferred by exclusion even when the closer itself is unresolved."""
+    raw = _two_party_no_explicit_role(closer="Alguém Fora Da Call")
+    result = parse_agro_call(raw, company_id=COMPANY_ID)
+    assert result.raw_input["closer_id"] is None
+    assert not any(p["role"] == "lead" for p in result.raw_input["participants"])
+    assert "unresolved_lead" in result.quality_flags
+
+
+def test_parse_agro_call_flags_unresolved_lead_solo_closer_call():
+    """A call with only the closer speaking has no lead to resolve — flag still fires,
+    distinguishing 'no lead present' from 'no objection happened'."""
+    raw = agro_raw_call()
+    raw["participants"] = [{"label": "Joao"}]
+    raw["transcript"] = [{"speaker": "Joao", "start": 0.0, "end": 5.0, "text": "Oi, alguém aí?"}]
+    result = parse_agro_call(raw, company_id=COMPANY_ID)
+    assert "unresolved_lead" in result.quality_flags
+
+
+def test_parse_agro_call_no_unresolved_lead_flag_when_lead_role_explicit():
+    """Baseline: explicit source evidence (participants[].role == "lead") is the only
+    legitimate way role="lead" gets set — must not raise the flag."""
+    result = parse_agro_call(agro_raw_call(), company_id=COMPANY_ID)
+    assert "unresolved_lead" not in result.quality_flags
+
+
+def test_parse_agro_call_unresolved_lead_is_deterministic():
+    raw = _two_party_no_explicit_role()
+    first = parse_agro_call(raw, company_id=COMPANY_ID)
+    second = parse_agro_call(raw, company_id=COMPANY_ID)
+    assert first.raw_input == second.raw_input
+    assert first.quality_flags == second.quality_flags
