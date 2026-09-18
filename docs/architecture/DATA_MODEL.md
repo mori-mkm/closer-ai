@@ -41,3 +41,42 @@ etapa, objeção levantada, estratégia usada e momento da call.
   ambiente controlado do cliente (ver [`data/README.md`](../../data/README.md)).
 - Este documento evolui conforme o Golden Set e a taxonomia forem definidos. Mudança de
   modelo aqui é decisão relevante — considerar ADR quando afetar contrato entre módulos.
+
+## Deal-level: Call outcome != Deal outcome
+
+`Call` (`closer_ai.normalization.Call`) nunca tem outcome comercial, `value` ou `closed_at`.
+O resultado da venda existe **uma única vez**, no `Deal`, nunca duplicado por call:
+
+```
+Deal
+│
+├── Call A
+│   ├── Objection 1
+│   └── Objection 2
+│
+├── Call B
+│   └── Objection 3
+│
+├── Stage Events (histórico append-only, nunca sobrescrito)
+│
+└── Outcome (OPEN / WON / LOST / UNKNOWN — só aqui)
+```
+
+No schema real (não conceitual), `Deal` **não embute** `Call`/`Objection` — a árvore acima é a
+visão conceitual; a ligação real é por id via `CallDealMatch`, nunca nesting:
+
+```
+Call
+  ↓
+candidate Deals
+  ↓
+CallDealMatch (uma linha por candidato avaliado — nunca um vencedor escolhido silenciosamente)
+  ↓
+MATCHED / AMBIGUOUS / REJECTED / UNMATCHED / MANUAL_REVIEW
+  ↓
+Deal (via CallDealMatch.deal_id, quando o status permite)
+```
+
+Contrato completo (`Lead`, `Deal`, `StageEvent`, `CallDealMatch`, `MatchEvidence`, cardinalidades,
+invariantes, IDs determinísticos): [`docs/domain/DEAL_MODEL.md`](../domain/DEAL_MODEL.md).
+Implementação: `src/closer_ai/domain/{lead,deal,matching}.py`.
