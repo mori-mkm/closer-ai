@@ -9,12 +9,20 @@ to it.
 Design decisions worth knowing:
 
 - Never returns field VALUES, only names, types, and counts. Timestamp-like and speaker-like
-  fields are detected by KEY NAME heuristics only (never by inspecting/echoing the value), so
-  there is no path through this module that could serialize a name, email, phone number, or
-  transcript line into its output. The one deliberate exception — counting *distinct* values
-  under a speaker-like key — never surfaces the values themselves, only `len(set(...))`; this
-  is explicitly allowed by the task this module was built for ("number of speaker identifiers"
-  is a safe structural fact, the identifiers themselves are not).
+  fields are detected by KEY NAME heuristics only (never by inspecting/echoing the value). The
+  one deliberate exception — counting *distinct* values under a speaker-like key — never
+  surfaces the values themselves, only `len(set(...))`; this is explicitly allowed by the task
+  this module was built for ("number of speaker identifiers" is a safe structural fact, the
+  identifiers themselves are not).
+- **Key names are not automatically trusted as safe either.** A JSON object's own top-level
+  keys can themselves BE the sensitive data — e.g. `{"maria@x.com": {...}, "joao@x.com": {...}}`,
+  a participant/attendee map keyed by identity rather than a list of records. Any key (JSON or
+  CSV header) that matches an email- or phone-shaped pattern is redacted to
+  `<redacted_key_N>` before it can appear anywhere in the report (`_sanitize_keys`). This is a
+  pattern-based heuristic, not a general PII detector — a key that's a bare human name (e.g.
+  `"Maria Silva": {...}`) would not be caught by it. Same class of known, documented gap as
+  `MatchEvidence.detail`'s PII convention (`docs/context/TECH_DEBT.md` TD-04): closes the
+  concrete, reproducible risk, does not claim to close every risk.
 - Filenames are not trusted either: a real filename could itself carry PII (e.g.
   "maria_silva_call.json"). `profile_file` never puts `path.name` in the returned profile —
   only a `safe_id`, which defaults to a stable, non-reversible hash of the path unless the
@@ -31,6 +39,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,6 +49,26 @@ _SPEAKER_KEY_HINTS = ("speaker", "participant", "user", "host", "attendee")
 _TRANSCRIPT_KEY_HINTS = ("transcript", "segments", "entries", "utterances", "lines")
 
 _SUPPORTED_EXTENSIONS = {".json", ".csv", ".txt", ".vtt", ".srt"}
+
+# A raw key/column-header that matches either of these IS the sensitive data (e.g. a
+# participant map keyed by email), not a schema field name — see module docstring.
+_EMAIL_LIKE_KEY = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PHONE_LIKE_KEY = re.compile(r"^\+?[\d][\d\s\-().]{6,}$")
+
+
+def _sanitize_keys(raw_keys: list[str]) -> tuple[dict[str, str], int]:
+    """Maps every raw key to a safe-to-report name: itself, unless it looks like an email or
+    phone number, in which case it becomes a redacted placeholder. Never returns the raw key
+    for anything that matched. Returns (raw_key -> safe_key, redacted_count)."""
+    mapping: dict[str, str] = {}
+    redacted = 0
+    for k in raw_keys:
+        if _EMAIL_LIKE_KEY.match(k) or _PHONE_LIKE_KEY.match(k):
+            redacted += 1
+            mapping[k] = f"<redacted_key_{redacted}>"
+        else:
+            mapping[k] = k
+    return mapping, redacted
 
 
 @dataclass(frozen=True)
@@ -69,6 +98,11 @@ def _safe_id_for(path: Path) -> str:
 
 
 def _detect_encoding(raw: bytes) -> str | None:
+    # latin-1 successfully decodes every byte value, so it would otherwise mask genuinely
+    # binary content (mp3, etc.) as "text" — an embedded null byte is a standard, cheap
+    # heuristic for "this is not text at all", checked before the latin-1 fallback ever runs.
+    if b"\x00" in raw:
+        return None
     for candidate in ("utf-8", "latin-1"):
         try:
             raw.decode(candidate)
@@ -84,32 +118,38 @@ def _has_hint(key: str, hints: tuple[str, ...]) -> bool:
 
 
 def _profile_json_records(records: list[dict[str, Any]]) -> dict[str, Any]:
-    keys: list[str] = []
+    # raw_keys are used for all actual dict lookups below (record.get(k)); everything that
+    # ends up in the returned profile uses key_map[k] instead — see _sanitize_keys and the
+    # module docstring for why a raw key can itself be sensitive (e.g. an email-keyed map).
+    raw_keys: list[str] = []
     for record in records:
         if isinstance(record, dict):
             for k in record:
-                if k not in keys:
-                    keys.append(k)
+                if k not in raw_keys:
+                    raw_keys.append(k)
+
+    key_map, redacted_count = _sanitize_keys(raw_keys)
 
     field_types: dict[str, str] = {}
-    null_counts: dict[str, int] = {k: 0 for k in keys}
-    for k in keys:
+    null_counts: dict[str, int] = {key_map[k]: 0 for k in raw_keys}
+    for k in raw_keys:
+        safe_k = key_map[k]
         seen_type: str | None = None
         for record in records:
             if not isinstance(record, dict):
                 continue
             value = record.get(k)
             if value is None:
-                null_counts[k] += 1
+                null_counts[safe_k] += 1
                 continue
             if seen_type is None:
                 seen_type = type(value).__name__
-        field_types[k] = seen_type or "null"
+        field_types[safe_k] = seen_type or "null"
 
-    timestamp_like = tuple(k for k in keys if _has_hint(k, _TIMESTAMP_KEY_HINTS))
-    duration_present = any(_has_hint(k, ("duration",)) for k in keys)
+    timestamp_like = tuple(key_map[k] for k in raw_keys if _has_hint(k, _TIMESTAMP_KEY_HINTS))
+    duration_present = any(_has_hint(k, ("duration",)) for k in raw_keys)
 
-    speaker_key = next((k for k in keys if _has_hint(k, _SPEAKER_KEY_HINTS)), None)
+    speaker_key = next((k for k in raw_keys if _has_hint(k, _SPEAKER_KEY_HINTS)), None)
     speaker_count = None
     if speaker_key is not None:
         # count of DISTINCT values only — never the values themselves (see module docstring)
@@ -128,15 +168,25 @@ def _profile_json_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         if transcript_count is not None:
             break
 
+    notes: tuple[str, ...] = ()
+    if redacted_count:
+        message = (
+            f"{redacted_count} top-level key(s) matched an email/phone pattern and were "
+            "redacted — this may mean the object is keyed by identity rather than by schema "
+            "field name; inspect structure manually before trusting keys/field_types"
+        )
+        notes = (message,)
+
     return {
         "record_count": len(records),
-        "keys": tuple(keys),
+        "keys": tuple(key_map[k] for k in raw_keys),
         "field_types": field_types,
         "null_counts": null_counts,
         "timestamp_like_fields": timestamp_like,
         "duration_field_present": duration_present,
         "speaker_identifier_count": speaker_count,
         "transcript_segment_count": transcript_count,
+        "notes": notes,
     }
 
 
@@ -163,23 +213,33 @@ def _profile_json(raw: bytes, encoding: str) -> dict[str, Any]:
 def _profile_csv(raw: bytes, encoding: str) -> dict[str, Any]:
     text = raw.decode(encoding)
     reader = csv.DictReader(io.StringIO(text))
-    keys = tuple(reader.fieldnames or ())
-    null_counts = {k: 0 for k in keys}
+    raw_keys = tuple(reader.fieldnames or ())
+    key_map, redacted_count = _sanitize_keys(list(raw_keys))
+
+    null_counts = {key_map[k]: 0 for k in raw_keys}
     row_count = 0
     for row in reader:
         row_count += 1
-        for k in keys:
+        for k in raw_keys:
             if not (row.get(k) or "").strip():
-                null_counts[k] += 1
-    timestamp_like = tuple(k for k in keys if _has_hint(k, _TIMESTAMP_KEY_HINTS))
-    duration_present = any(_has_hint(k, ("duration",)) for k in keys)
+                null_counts[key_map[k]] += 1
+    timestamp_like = tuple(key_map[k] for k in raw_keys if _has_hint(k, _TIMESTAMP_KEY_HINTS))
+    duration_present = any(_has_hint(k, ("duration",)) for k in raw_keys)
+    notes: tuple[str, ...] = ()
+    if redacted_count:
+        message = (
+            f"{redacted_count} column header(s) matched an email/phone pattern and were "
+            "redacted — inspect structure manually before trusting keys/field_types"
+        )
+        notes = (message,)
     return {
         "record_count": row_count,
-        "keys": keys,
-        "field_types": {k: "str" for k in keys},  # CSV cells are all strings structurally
+        "keys": tuple(key_map[k] for k in raw_keys),
+        "field_types": {key_map[k]: "str" for k in raw_keys},  # CSV cells are all strings structurally
         "null_counts": null_counts,
         "timestamp_like_fields": timestamp_like,
         "duration_field_present": duration_present,
+        "notes": notes,
     }
 
 

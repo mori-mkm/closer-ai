@@ -116,13 +116,49 @@ def test_profile_directory_uses_sequential_sample_ids_not_filenames(tmp_path: Pa
 
 def test_malformed_file_error_does_not_leak_content(tmp_path: Path):
     path = tmp_path / "broken.json"
-    path.write_text(f"{{not valid json, but contains {_FAKE_EMAIL}", encoding="utf-8")
+    path.write_text(
+        f"{{not valid json, but contains {_FAKE_EMAIL} {_FAKE_PHONE} {_FAKE_NAME} "
+        f"{_FAKE_TRANSCRIPT_LINE}",
+        encoding="utf-8",
+    )
+
+    profile = profile_file(path)
+    rendered = _profile_as_text(profile)
+
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in rendered
+    assert profile.notes  # failure is visible, just not the content that caused it
+
+
+def test_json_object_keyed_by_identity_does_not_leak_keys_as_field_names(tmp_path: Path):
+    """Regression test: a participant/attendee map keyed BY identity (email as the dict key
+    itself, not a value) is a realistic real-world export shape. The email must never appear
+    anywhere in the profile, including as a "field name" — see _sanitize_keys."""
+    raw = {
+        _FAKE_EMAIL: {"role": "lead", "speaking_time": 120},
+        "joao.pereira@empresa.com.br": {"role": "closer", "speaking_time": 300},
+    }
+    path = tmp_path / "attendees.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
 
     profile = profile_file(path)
     rendered = _profile_as_text(profile)
 
     assert _FAKE_EMAIL not in rendered
-    assert profile.notes  # failure is visible, just not the content that caused it
+    assert "joao.pereira@empresa.com.br" not in rendered
+    assert all(k.startswith("<redacted_key_") for k in profile.keys)
+    assert profile.notes  # the redaction itself must be visible, so a human knows to look closer
+
+
+def test_csv_header_keyed_by_identity_does_not_leak_as_field_name(tmp_path: Path):
+    path = tmp_path / "attendees.csv"
+    path.write_text(f"{_FAKE_EMAIL},role\n1,lead\n", encoding="utf-8")
+
+    profile = profile_file(path)
+    rendered = _profile_as_text(profile)
+
+    assert _FAKE_EMAIL not in rendered
+    assert profile.notes
 
 
 # --- structural correctness ---
@@ -211,4 +247,16 @@ def test_profile_is_deterministic(tmp_path: Path):
 
     first = profile_file(path, safe_id="sample_001")
     second = profile_file(path, safe_id="sample_001")
+    assert first == second
+
+
+def test_default_safe_id_is_deterministic_across_calls(tmp_path: Path):
+    """Same as above, but for the default hash-based safe_id (no explicit safe_id passed) —
+    the id itself must be stable, not just the rest of the profile."""
+    path = tmp_path / "call.json"
+    path.write_text(json.dumps({"a": 1}), encoding="utf-8")
+
+    first = profile_file(path)
+    second = profile_file(path)
+    assert first.safe_id == second.safe_id
     assert first == second

@@ -208,6 +208,8 @@ What "ready" means when handing a validated call to Otávio's Golden Set workflo
 technical preconditions only, not the annotation guideline content itself (his to define):
 
 - Transcript usable (parsed, no `transcript_parse_error` covering the whole call)
+- Canonical Call validated successfully (`normalize_call()` produced a valid `Call`, not just a
+  parseable `AgroRawCall` — steps 12-13 of the runbook, distinct from step 11's parse-only check)
 - Timestamps sufficiently valid for evidence grounding
 - Speaker mapping usable (every segment's `speaker_id` resolves to a known participant)
 - Lead resolution known — either resolved (`role="lead"`) or explicitly flagged

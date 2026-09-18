@@ -61,9 +61,10 @@ Pré-requisito: as 5 calls já estão em `data/raw/agro/` (nunca no Git — ver
     proposta de mapeamento em 1 call; confirmar que produziria um `Call` válido **e** que o
     participante não-closer chegaria a `role="lead"` (passo 13) — ou identificar onde quebraria.
 19. **Run on 5** — repetir para as 5 calls.
-20. **Produce quality report** — usar `docs/data/DATA_QUALITY_REPORT.md` (seção Agro): quantas
-    das 5 produziriam `Call` válido, quais `quality_flags` apareceriam, quais falhariam e por
-    quê. Incluir explicitamente quantas produziriam pelo menos um participante `role="lead"`.
+20. **Produce quality report** — usar `docs/data/DATA_QUALITY_REPORT.md` (tabela "Calls (Agro /
+    Empreende)"): quantas das 5 produziriam `Call` válido, quais `quality_flags` apareceriam,
+    quais falhariam e por quê. Incluir explicitamente quantas produziriam pelo menos um
+    participante `role="lead"`.
 21. **Review before batch** — antes de processar as 108, revisar o relatório de qualidade e o
     mapeamento proposto com Product/RevOps + AI/Backend Lead; só então abrir a branch de
     implementação real (ver "Exact next engineering trigger" no relatório de reconciliação).
