@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from closer_ai.ingestion.profiling import profile_directory, profile_file
+from closer_ai.ingestion.profiling import profile_directory, profile_file, summarize_capacity
 
 _FAKE_EMAIL = "fake@example.com"
 _FAKE_PHONE = "+55 11 99999-9999"
@@ -333,3 +333,24 @@ def test_default_safe_id_is_deterministic_across_calls(tmp_path: Path):
     second = profile_file(path)
     assert first.safe_id == second.safe_id
     assert first == second
+
+
+# --- capacity discovery ---
+
+
+def test_summarize_capacity_groups_bytes_by_format(tmp_path: Path):
+    (tmp_path / "a.json").write_text(json.dumps({"a": 1}), encoding="utf-8")
+    (tmp_path / "b.json").write_text(json.dumps({"a": 1, "b": 2}), encoding="utf-8")
+    (tmp_path / "c.mp3").write_bytes(b"\x00" * 100)
+
+    profiles = profile_directory(tmp_path)
+    totals = summarize_capacity(profiles)
+
+    json_total = sum(p.size_bytes for p in profiles if p.format == "json")
+    assert totals["json"] == json_total
+    assert totals["unsupported:.mp3"] == 100
+    assert sum(totals.values()) == sum(p.size_bytes for p in profiles)
+
+
+def test_summarize_capacity_of_empty_list_is_empty_dict():
+    assert summarize_capacity([]) == {}

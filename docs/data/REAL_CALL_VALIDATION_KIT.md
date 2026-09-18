@@ -224,9 +224,13 @@ technical preconditions only, not the annotation guideline content itself (his t
 ```
 1.  Confirm authorization (docs/context/HUMAN_DECISIONS.md) — STOP if not confirmed
 2.  Receive 3-5 real source samples (docs/data/REAL_DATA_REQUEST.md)
-3.  Store under data/raw/<source>/ (gitignored — confirm with `git check-ignore -v`)
-4.  Register/update a manifest (data/manifests/<dataset_id>.yaml, from TEMPLATE.yaml)
-5.  Run structural profile (closer_ai.ingestion.profiling.profile_directory)
+3.  Upload to OCI (docs/data/OCI_SHARED_STORAGE.md — the durable, shared source of truth),
+    then sync locally under data/raw/<source>/ (gitignored — confirm with `git check-ignore -v`;
+    local copy is ephemeral, reproducible from OCI any time)
+4.  Register/update a manifest (data/manifests/<dataset_id>.yaml, from TEMPLATE.yaml) — upload
+    the manifest to OCI's manifests/ prefix too
+5.  Run structural profile (closer_ai.ingestion.profiling.profile_directory) and capacity
+    discovery (closer_ai.ingestion.profiling.summarize_capacity)
 6.  Inspect source structure (Source Discovery Questions, above)
 7.  Create raw→canonical mapping (RAW_TO_CANONICAL_MAPPING_TEMPLATE.md)
 8.  Validate identity/roles (Identity & Role Validation, above)

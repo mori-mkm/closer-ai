@@ -10,6 +10,7 @@ Papéis usados abaixo (sem nomes pessoais — só quem decide/resolve cada block
 ## Cadeia 1 — Agro/Zoom → Call Intelligence
 
 Runbook operacional: [`docs/data/REAL_CALL_VALIDATION_KIT.md`](../data/REAL_CALL_VALIDATION_KIT.md).
+Armazenamento compartilhado (OCI, privado, nunca no Git): [`docs/data/OCI_SHARED_STORAGE.md`](../data/OCI_SHARED_STORAGE.md).
 
 ```
 Agro/Zoom real (108 calls)

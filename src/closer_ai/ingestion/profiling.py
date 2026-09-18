@@ -341,3 +341,15 @@ def profile_directory(directory: Path) -> list[StructuralProfile]:
     return [
         profile_file(p, safe_id=f"sample_{index:03d}") for index, p in enumerate(files, start=1)
     ]
+
+
+def summarize_capacity(profiles: list[StructuralProfile]) -> dict[str, int]:
+    """Total bytes per file format across a batch of profiles — the cheapest real answer to
+    "how much data are we actually talking about" before deciding what to upload (transcripts
+    first, audio/video only if justified — see docs/data/OCI_SHARED_STORAGE.md). Grouped by
+    `format`, including `unsupported:<ext>` buckets for audio/video/other binary formats the
+    profiler doesn't parse but still sizes. Byte counts carry no PII — safe to log/commit."""
+    totals: dict[str, int] = {}
+    for p in profiles:
+        totals[p.format] = totals.get(p.format, 0) + p.size_bytes
+    return totals
