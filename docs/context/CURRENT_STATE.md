@@ -106,6 +106,10 @@ o mapa completo de inputs/outputs/owner por nó:
 ## Technical debt
 
 Registro completo: `docs/context/TECH_DEBT.md`. Itens P0/P1 mais relevantes hoje:
+- **TD-14 (P0, achado nesta rodada de onboarding):** o parser Agro nunca resolve
+  `role="lead"` para nenhum participante (só `closer`/`unknown`) — sem isso,
+  `RuleBasedObjectionExtractor` produz zero objeções silenciosamente em qualquer call real.
+  Bloqueador antes de avaliar o extractor v0 contra dado real.
 - Identidade de participante Agro baseada em nome/label normalizado (`_slugify`), não em id
   estável da fonte — colisões fundem participantes distintos (P1).
 - `MatchEvidence.detail` é convenção não-enforced de "sem PII" — nada no schema impede um

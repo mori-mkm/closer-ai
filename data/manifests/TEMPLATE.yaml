@@ -1,0 +1,17 @@
+# Template de manifest para um lote de dado real recebido.
+# Este arquivo é documentação/template — versionável. Uma cópia preenchida por dataset
+# recebido (data/manifests/<dataset_id>.yaml) também é versionável, DESDE QUE nenhum campo
+# abaixo contenha PII ou conteúdo real — só metadados operacionais.
+# Ver data/README.md e docs/data/PRIVACY_BOUNDARY.md antes de preencher.
+
+dataset_id: ""            # ex.: "agro-sample-2026-09-18" — identificador do lote, não do conteúdo
+source: ""                 # "agro" | "empreende" | "kommo"
+received_at: ""            # data ISO 8601, ex.: "2026-09-18"
+received_from_role: ""     # "Partner Owner" | "Product/RevOps" | "Data/Analytics" — nunca um nome pessoal aqui
+record_count: 0             # quantidade de registros (calls ou deals), não seus conteúdos
+files:
+  - ""                     # nomes de arquivo recebidos (ex.: "call_001.vtt") — nunca conteúdo
+contains_pii: true          # sempre true para dado real; nunca preencher false sem revisão
+authorization_status: ""    # "UNKNOWN" | "REQUESTED" | "CONFIRMED" — ver docs/context/HUMAN_DECISIONS.md
+checksum: ""                 # sha256 do(s) arquivo(s), para detectar reenvio duplicado
+notes: ""                    # observações operacionais, nunca texto de transcript/CRM
