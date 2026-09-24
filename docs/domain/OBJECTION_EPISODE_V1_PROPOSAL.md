@@ -1,6 +1,6 @@
 # ObjectionEpisode v1 — Proposal (AC-47)
 
-Status: **PROPOSAL rev. 4 — não implementado.** Nenhum código muda com este documento.
+Status: **PROPOSAL rev. 5 — não implementado.** Nenhum código muda com este documento.
 Contrato vigente continua sendo `ObjectionEvent` v0 (`docs/domain/OBJECTION_MODEL.md`,
 `src/closer_ai/domain/objection.py`).
 
@@ -19,6 +19,10 @@ Histórico de revisões:
   (§12.1); "terminou no fim da call" como julgamento (§11); `deal_id` só com MATCHED (§11);
   métricas com gold vazio (§12.6); pendência como pergunta D6 (§9.1, §19). Schema continua
   com 7 campos.
+- rev. 5: deal linkage = resultado autoritativo atual, nunca `latest WHERE status='matched'`;
+  linkage indisponível até DEP-1 (§11, §19); runs com saídas inválidas (§12.1.1); serialização
+  canônica do `segment_sequence_hash` (§11); afirmação sobre correção de âncora restringida
+  (§10). Schema continua com 7 campos.
 
 Pergunta que este documento responde:
 
@@ -518,7 +522,10 @@ Notas:
 
 - Objetor entra **implicitamente** via âncora (um segmento tem um `speaker_id`).
 - Dois episódios da mesma categoria não compartilham âncora (colapsam).
-- Eval compara por **overlap** (§12), não por id — correções de âncora não quebram métricas.
+- O episode matching (§12.2) **não exige** `episode_id` nem âncora iguais, mas um par
+  candidato **ainda exige** sobreposição de evidência de objeção (`O(g) ∩ O(p) ≠ ∅`). Logo:
+  correção de âncora que **mantém** sobreposição de evidência de objeção → pode casar;
+  correção de âncora **sem** sobreposição de evidência de objeção → não casa (FP + FN).
 - Quando existir storage: correção de âncora = delete + insert, nunca update in-place.
   Golden set é versionado como lote.
 - Namespace `ep_` nunca colide com `obj_`. Call/Deal/Lead IDs inalterados.
@@ -528,7 +535,7 @@ Notas:
 | Classe | Itens |
 |---|---|
 | **DIRECT EVIDENCE** | `call_id`; existência dos segmentos referenciados; `speaker_id`, `role`, `text` desses segmentos (vivem na Call) |
-| **DERIVED DETERMINISTICALLY** | `episode_id`; âncora; objetor; primeiro/último segmento e tempos (dados as listas); partição estrutural por speaker (§7.3); `closer_segment_count`; same-category recurrence by same objector (dado o conjunto de episódios); `deal_id` **somente** quando o match corrente da call é `matched` (convenção de `matching.py`, ver abaixo) |
+| **DERIVED DETERMINISTICALLY** | `episode_id`; âncora; objetor; primeiro/último segmento e tempos (dados as listas); partição estrutural por speaker (§7.3); `closer_segment_count`; same-category recurrence by same objector (dado o conjunto de episódios); `deal_id` **somente** quando o resultado **autoritativo atual** do matching da call é `matched` — hoje **indisponível** (ver "Deal linkage" abaixo) |
 | **HUMAN JUDGMENT** (golden set) | que há objeção; `category`; quais segmentos entram e em qual lista; âncora (§5.3); closure, deferral/parked, on-topic funcional (§5.1); "fio ainda aberto/parked quando a call terminou"; fronteira de resposta, aspecto e rótulo de cada resposta (§9.1); `resolution_status`; função semântica de qualquer fala |
 | **MODEL INFERENCE** (extractor) | os mesmos itens de HUMAN JUDGMENT quando produzidos por extractor |
 | **NÃO REPRESENTADO em v1** | reopening; non-durable resolution; estado parked; "terminou no fim da call"; handling steps; estratégia |
@@ -537,12 +544,43 @@ Notas:
 último segmento do episódio não é o ponto em que o fio fechou. É julgamento ("o fio estava
 OPEN/PARKED quando a call acabou?") e **não é armazenado em v1**.
 
-**Deal linkage:** `deal_id` canônico derivado só existe quando o **match corrente** da
-call é `matched`, pela consulta já definida em `src/closer_ai/domain/matching.py` ("latest row by created_at with status='matched'"); este documento não redefine essa regra. Linhas `ambiguous`
-(várias linhas candidatas), `unmatched` (sem `deal_id`), `rejected` ou `manual_review` **nunca
-produzem** `deal_id` canônico derivado; sem linha `matched`, os episódios dessa call não têm
-deal. Nenhuma mudança em `Deal`
-ou `CallDealMatch`.
+**Deal linkage (rev. 5).** Duas operações separadas, **nessa ordem**:
+
+```
+1. current_match_result(call_id)   → o resultado AUTORITATIVO ATUAL do matching da call
+2. interpretar o status desse resultado:
+     matched                                        → deal_id canônico existe
+     ambiguous | rejected | unmatched | manual_review → linkage canônico INDISPONÍVEL
+```
+
+**Nunca** `latest row WHERE status='matched'`: filtrar por status **antes** de resolver o
+resultado atual ressuscita matches históricos.
+
+Tabela abaixo = o que o contrato exige **quando** existir um resolver autoritativo (hoje não
+existe; ver "Dependência não resolvida"):
+
+| Histórico da call | `latest WHERE status='matched'` (errado) | Contrato |
+|---|---|---|
+| 10:00 MATCHED A · 11:00 REJECTED (revisão manual) | Deal A | resultado atual = REJECTED → indisponível |
+| 10:00 MATCHED A · 11:00 AMBIGUOUS {A, B} | Deal A | resultado atual = AMBIGUOUS → indisponível |
+| 10:00 MATCHED A · 11:00 MATCHED A | Deal A | resultado atual = MATCHED A → Deal A |
+| 10:00 MATCHED A · 11:00 MATCHED B | Deal B | resultado atual = MATCHED B → Deal B |
+
+Regras:
+
+- **Evidência histórica de `matched` ≠ linkage canônico atual.** Linhas antigas são
+  auditoria, nunca fallback.
+- **Sem fallback** para matches históricos em nenhum caso.
+- **Dependência não resolvida:** a camada atual **não** define `current_match_result` de forma
+  autoritativa. `CallDealMatch` não tem id de batch/run nem marca de supersessão; o docstring
+  de `src/closer_ai/domain/matching.py` descreve o "match atual" como "latest row by
+  created_at with status='matched'", que é exatamente a consulta rejeitada acima; e linhas com
+  o mesmo `created_at` (batch ambíguo, relógios) não têm ordem autoritativa.
+- **Consequência para v1:** até existir esse resolver, **o linkage canônico
+  Episode → Deal fica INDISPONÍVEL** para todas as calls. Nenhum consumidor (Outcome
+  Intelligence incluído) deriva `deal_id` de episódios.
+- Nenhuma mudança em `Deal`, `CallDealMatch` ou no schema de matching nesta AC-47. Ver
+  dependência DEP-1 (§19).
 
 **Proveniência (D4 APPROVED):** pertence ao **extraction/eval run**, não ao episódio:
 
@@ -551,8 +589,36 @@ ou `CallDealMatch`.
 - **identidade da Call de origem, por call** (P1-C):
   - `normalizer_version` — versão do parser/normalizer que materializou a Call;
   - `canonical_call_schema_version` — `Call.schema_version`;
-  - `segment_sequence_hash` — sha256 sobre `json.dumps` da lista ordenada de
-    `[segment_id, segment_index, speaker_id, role do speaker, sha256(text)]`.
+  - `segment_sequence_hash` — fingerprint canônico da segmentação (serialização abaixo).
+
+**Serialização canônica do `segment_sequence_hash`** (reproduzível entre implementações):
+
+1. Para cada segmento da Call, **em ordem de `segment_index`**, montar o array ordenado
+   (sem objetos/chaves):
+
+   ```
+   [segment_id, segment_index, speaker_id, speaker_role, text_sha256]
+   ```
+
+   - `segment_index`: inteiro JSON em decimal;
+   - `speaker_role`: `Participant.role` do `speaker_id` na mesma Call;
+   - `text_sha256`: SHA-256, em hexadecimal **minúsculo**, dos **bytes UTF-8 exatos** de
+     `TranscriptSegment.text`. **Proibido** antes do hash: trim, lowercase, normalização
+     Unicode, alteração de whitespace ou qualquer outra mutação do texto.
+2. Serializar a lista completa (lista de arrays) em JSON canônico com a **mesma convenção de
+   `src/closer_ai/normalization/ids.py`**: equivalente a
+   `json.dumps(rows, ensure_ascii=True, separators=(",", ":"))` — sem whitespace
+   insignificante, não-ASCII escapado como `\uXXXX` (hex minúsculo, surrogate pairs para
+   fora do BMP), sem chaves de objeto.
+3. `segment_sequence_hash` = SHA-256, em hexadecimal minúsculo, dos bytes UTF-8 dessa string.
+
+Por que `ensure_ascii=True` (e não `false`): consistência com a convenção já usada para todos
+os ids do repo; a string serializada vira ASCII puro, então "bytes UTF-8" não depende de como
+cada linguagem codifica não-ASCII. Na prática, o texto só entra como digest hex; os únicos
+campos que poderiam ter não-ASCII são `segment_id`/`speaker_id`. Um vetor de teste sintético
+fixo (entrada → hash esperado) é obrigatório quando isso for implementado (D7).
+
+A proveniência guarda **só digests**: nenhum texto de transcrição é exposto.
 
 Por que essa escolha (e não só `source_call_manifest_id`): o manifest identifica o **dado
 bruto**, não o **resultado da normalização** — um parser novo sobre o mesmo manifest mudaria
@@ -589,14 +655,33 @@ calculável a partir da `Call` existente: **nenhuma mudança na Canonical Call**
    de contexto tem índice > índice da âncora. O modelo isolado não consegue checar isso
    (ids são hashes), por isso é grounding obrigatório.
 
-**Episódio inválido:** falhar qualquer regra desta seção (ou §12.0) torna o episódio
-**INVALID**. Episódio inválido **não é persistido, não é avaliado e não é re-derivado**
-(nenhuma reordenação ou correção automática de âncora/id); é reportado como erro do run
-(conta na grounding rate, §12.5).
 5. Dentro de um run, `episode_id` é único (nenhum par de episódios com mesma call, âncora e
    categoria). Duplicata = saída inválida do run, reportada, não deduplicada em silêncio.
    Isso garante que, por partição, âncoras são únicas e o desempate de §12.2 é uma ordem
    total.
+
+**Episódio inválido:** falhar qualquer regra desta seção, a validação estrutural do modelo
+(§6) ou §12.0 torna o episódio **INVALID**. Episódio inválido **não é persistido, não é
+avaliado e não é re-derivado** (nenhuma reordenação ou correção automática de âncora/id).
+
+### 12.1.1 Runs com saídas inválidas
+
+Se **qualquer** saída de um run falha a validação estrutural/grounding:
+
+- o run é **INVALID para as métricas canônicas de detecção**;
+- P/R/F1 primários (e as métricas de qualidade de §12.5 derivadas deles) são **suprimidos —
+  reportados como N/A**, com o motivo;
+- diagnósticos opcionais podem ser reportados **só** com o rótulo explícito
+  **`valid-output-only`**, nunca no lugar das métricas canônicas;
+- **todas** as saídas emitidas, inclusive as inválidas, entram no denominador de
+  validity/grounding rate (§12.5);
+- saídas inválidas **nunca** são descartadas em silêncio: cada uma é listada com a regra que
+  falhou.
+
+Exemplo: 1 episódio válido e correto + 9 episódios com segment ids pendentes → run INVALID;
+P/R/F1 canônicos = N/A; grounding rate = 1/10; um eventual diagnóstico
+`valid-output-only` mostraria P = 1.0 **rotulado como tal**, nunca como a precisão do run.
+Vale igualmente para um run humano (gold): gold inválido → comparação recusada.
 
 ### 12.2 Episode matching (contrato do evaluator)
 
@@ -662,7 +747,8 @@ Na mesma partição:
 - **Episode extent:** Jaccard médio de `E`.
 - **Resolution:** matriz de confusão 4×4 e kappa, **só nos TPs**; reportar junto quantos
   episódios ficaram fora por FP/FN.
-- **Grounding rate:** % das predições que passam §12.1.
+- **Grounding/validity rate:** saídas válidas / **todas** as saídas emitidas (inválidas
+  incluídas no denominador, §12.1.1). Sempre reportada, mesmo em run INVALID.
 
 ### 12.6 Conjuntos vazios e agregação
 
@@ -721,6 +807,8 @@ duvidosa). Reintroduzir com semântica definida quando houver extractor probabil
 | Third-party aside | não fecha se não muda o fio comercial (§5.1). |
 | Parser/normalizer resegmentation between runs | comparação recusada; rematerializar/reanotar (§12.0). |
 | Ambiguous / unmatched CallDealMatch | sem `deal_id` canônico derivado (§11). |
+| MATCHED histórico seguido de REJECTED/AMBIGUOUS | resultado atual manda; histórico nunca é fallback (§11). Em v1, linkage indisponível até DEP-1. |
+| Run com saídas inválidas | run INVALID para métricas canônicas; P/R/F1 = N/A; `valid-output-only` rotulado (§12.1.1). |
 | Episode failing grounding/order | INVALID: não persistido, avaliado nem re-derivado (§12.1). |
 
 ## 15. Migration v0 → v1
@@ -756,7 +844,7 @@ link direto a `Deal`/`Outcome`; ligação cross-call de episódios.
 | Future taxonomy | `category` reusa enum v0; subtype aditivo; subtype é o caminho para separar preocupações da mesma categoria |
 | Annotation Guidelines | este documento define unidade, closure, âncora, listas e respostas; conteúdo das guidelines é de Otávio |
 | Future LLM extractor | saída = este contrato; precisa threading/closure, âncora, objetor e resolução; proveniência no run |
-| Deal / Outcome Intelligence | sem mudança de schema; via `call_id → CallDealMatch → deal_id` só com status `matched`; não pode assumir reabertura a partir de recorrência |
+| Deal / Outcome Intelligence | sem mudança de schema; linkage Episode → Deal **indisponível** até DEP-1 (resolver autoritativo do match atual); nunca `latest WHERE status='matched'`; não pode assumir reabertura a partir de recorrência |
 | Run provenance / eval harness | proveniência inclui identidade da Call de origem (§11); evaluator recusa comparar segmentações diferentes (§12.0); calculado a partir da `Call` existente |
 | IDs | novo `ep_`; demais inalterados |
 | Serialization | Pydantic JSON; `tuple` → array |
@@ -775,6 +863,15 @@ link direto a `Deal`/`Outcome`; ligação cross-call de episódios.
 | D6 | Os quatro status são anotáveis e comercialmente úteis? Inclui: pendência declarada ("ainda preciso verificar se consigo pagar") deve ser `unresolved`/REJECT, `partially_resolved`, `unknown` ou um estado futuro? | **OPEN** — Otávio + Gabriel |
 | D7 | Implementar o contrato | **BLOCKED** até D3 + D6 |
 | D8 | ADR | Sim, como **primeiro passo de D7**: registrar D1/D2/D4 em `docs/decisions/` antes de qualquer código. |
+
+**Dependências externas / dívida técnica registrada:**
+
+- **DEP-1 — resolver autoritativo do match atual (camada de matching).** Canonical Deal
+  linkage exige `current_match_result(call_id)` autoritativo (§11). Hoje: sem id de
+  batch/run nem supersessão em `CallDealMatch`, e o docstring de
+  `src/closer_ai/domain/matching.py` descreve a consulta rejeitada
+  (`latest row by created_at with status='matched'`). **Não implementado nesta branch**;
+  será tratado numa task própria de matching. Até lá, linkage Episode → Deal = indisponível.
 
 **D3 — piloto (sem thresholds).** O que medir: §12.3–12.6 humano A × humano B. Como: 3–5
 calls reais autorizadas, dois anotadores independentes, algoritmo §12.2. Inspeção: listar
@@ -803,7 +900,9 @@ objeções de participantes `other` ficam sem episódio (lacuna documentada, nã
 - [x] Migração sem quebrar v0; impacto por área.
 - [x] Aspecto operacional; mesma categoria em fio aberto; parked threads; logística e apartes.
 - [x] Pinning da segmentação da Call de origem e precondição de eval.
-- [x] Ordem/invalidade; deal linkage só `matched`; métricas com gold vazio.
+- [x] Ordem/invalidade; métricas com gold vazio.
+- [x] rev. 5: deal linkage por resultado autoritativo atual + DEP-1; runs inválidos; fingerprint canônico; wording de âncora.
 - [x] Review Domain / Evaluator / Architecture (rev. 4): APPROVE (Evaluator após fix de closure retrospectiva, §5.1).
+- [x] Architecture review (rev. 5): APPROVE.
 - [ ] D3, D5, D6 resolvidos.
 - [ ] (Próxima task) ADR + implementação, só após D3 + D6.
