@@ -1,6 +1,6 @@
 # Outcome Contract v0 — Proposal
 
-Status: **PROPOSAL — não implementado.** Nenhum código muda com este documento. Contrato
+Status: **PROPOSAL rev. 2 — não implementado.** Nenhum código muda com este documento. Contrato
 vigente continua sendo `Deal.outcome` (`src/closer_ai/domain/deal.py`,
 `docs/domain/DEAL_MODEL.md`).
 
@@ -9,13 +9,20 @@ Pergunta:
 > Qual é o menor contrato de Outcome capaz de representar o estado comercial de uma
 > oportunidade sem confundir CRM raw state com verdade canônica?
 
-Resposta curta: **duas entidades append-only novas**, sem alterar `Deal`, `StageEvent` ou
+Resposta curta: **três entidades append-only novas**, sem alterar `Deal`, `StageEvent` ou
 matching:
 
-- `OutcomeEvidence` — uma observação de uma fonte (CRM, closer, pagamento, automação,
-  humano), com o **estado bruto preservado** e um **sinal** interpretado.
-- `OutcomeAssessment` — a **interpretação canônica** do outcome de um Deal num momento,
-  citando as evidências, com confiança, flag de revisão e cadeia de supersessão.
+- `OutcomeEvidence` — uma **observação** de uma fonte, com o estado bruto preservado e um
+  **sinal** interpretado.
+- `EvidenceDisposition` — correção explícita de uma evidência (invalidada ou remapeada), sem
+  apagar nada; define o **conjunto elegível**.
+- `OutcomeAssessment` — uma decisão (automática ou humana) sobre o outcome do Deal, numa
+  **cadeia linear** com CAS; a decisão **autoritativa** é derivada da cadeia (humano mais
+  recente, senão o head).
+
+Rev. 2 corrige: elegibilidade de evidência (P0-1), autoridade humana persistente (P0-2),
+override como decisão inteira (P0-3), reversal como modificador (P0-4), identidade da
+observação (P0-5), concorrência/bifurcação (P1).
 
 Status canônicos v0: **`won`, `rejected`, `open`, `unknown`**. `future` vira **`open` +
 sinal `deferral`**; `stale` não existe; no-contact **nunca** vira `rejected`.
@@ -65,8 +72,8 @@ CRM aprenderia ruído de higiene de CRM, não comportamento comercial.
 |---|---|
 | Rejeitado mas aberto no CRM | CRM `open` sozinho **não** sustenta `open` canônico (§4) |
 | Fechado por Salesbot/no-contact | sinal `no_contact`, **nunca** `rejection` (§4, invariante I6) |
-| Retorno só em planilha do closer | fonte `closer_report` de primeira classe (§5) |
-| Cards paralelos | evidência referencia o registro de origem; consolidação é DEP-2 (§10) |
+| Retorno só em planilha do closer | fonte `closer_report` de primeira classe (§7.1) |
+| Cards paralelos | evidência referencia o registro de origem; consolidação é DEP-2 (§14.1) |
 | Motivo de perda não confiável | sem `rejection_type` em v0 (§4) |
 | Silêncio no CRM | não é abandono; sem `stale` (§4.6) |
 
@@ -86,7 +93,7 @@ CRM, que mistura rejeição com automação.
 
 ### 4.1 WON
 
-| Evidência | Sinal | Força (policy, §6) |
+| Evidência | Sinal | Força (policy, §7.3) |
 |---|---|---|
 | pagamento confirmado | `sale` | high |
 | pós-venda / membership ativa | `sale` | high |
@@ -174,40 +181,44 @@ Três camadas, nunca misturadas:
   canônico (D-M1). Nunca são sobrescritos pela camada canônica, e a camada canônica nunca é
   lida deles sem passar por uma evidência.
 
-## 6. Evidence contract — `OutcomeEvidence`
+## 6. Conceitos distintos
+
+| Conceito | O que é | Armazenado? |
+|---|---|---|
+| **Raw observation** | o que a fonte disse, verbatim (`raw_state`, `source_record_ref`, `observation_key`, `observed_at`) | sim, dentro de `OutcomeEvidence` |
+| **Evidence** | uma raw observation + o `signal` que ela afirma, atribuída a um Deal | sim, `OutcomeEvidence` (append-only) |
+| **Eligible evidence** | evidências do Deal **sem** disposição (§7.2) no momento da avaliação | conceito; o snapshot usado fica em `OutcomeAssessment.eligible_evidence_ids` |
+| **Supporting evidence** | o subconjunto das elegíveis que sustenta o status escolhido (§9) | `OutcomeAssessment.supporting_evidence_ids` (⊆ eligible) |
+| **Automatic candidate** | a decisão que a policy (`rule`) produz | sim, como `OutcomeAssessment` com `decision_method="rule"` |
+| **Authoritative canonical decision** | a decisão que governa o outcome do Deal (§8.2) | conceito derivado: aponta para **um** `OutcomeAssessment` existente, inteiro |
+
+Autoridade é **derivada**, não armazenada: nenhum campo novo para isso.
+
+## 7. Evidence contract
+
+### 7.1 `OutcomeEvidence`
 
 | Field | Purpose | Observable? | Derived? | Required? | MVP? | Why |
 |---|---|---|---|---|---|---|
 | `schema_version` | versionar | — | — | default | sim | padrão do repo |
-| `evidence_id` | identidade/idempotência | — | sim (hash) | sim | sim | redelivery colapsa (§11) |
-| `deal_id` | a qual Deal a evidência foi atribuída | atribuição é julgamento | — | sim | sim | outcome pertence ao Deal |
-| `source` | tipo de fonte | sim | — | sim | sim | policy de força depende da fonte |
-| `source_record_ref` | id opaco do registro na fonte (card, pagamento, linha de planilha) | sim | — | sim | sim | auditoria; cards paralelos; nunca PII |
-| `raw_state` | estado bruto verbatim da fonte estruturada | sim | — | obrigatório p/ `crm_status`; `None` p/ texto livre | sim | preservar CRM raw |
-| `signal` | o que esta evidência afirma | não | mapeamento/julgamento | sim | sim | separa raw de interpretação |
-| `observed_at` | quando o fato ocorreu na fonte (tz-aware) | sim | — | sim | sim | temporalidade, reabertura |
-| `confidence_level` | — | — | — | — | **não** | força vem da policy (source × signal), não de cada linha |
-| `needs_human_review` | — | — | — | — | **não** | revisão é propriedade da decisão, não da observação |
-| texto/quote | — | — | — | — | **não** | PII |
-| data de retomada | — | — | — | — | **não** | D-G7 |
+| `evidence_id` | identidade da **observação** | — | sim (§11) | sim | sim | idempotência; colisão (P0-5) |
+| `deal_id` | Deal ao qual foi atribuída | atribuição é julgamento | — | sim | sim | outcome pertence ao Deal |
+| `source` | tipo de fonte | sim | — | sim | sim | policy de força |
+| `source_record_ref` | id opaco do registro na fonte | sim | — | sim | sim | auditoria; cards paralelos; nunca PII |
+| `observation_key` | discriminador estável da observação **dentro** do registro (campo/path, id de evento, versão, linha/coluna) | sim | — | sim, não vazio | sim | **rev. 2 (P0-5):** stage e status do mesmo card no mesmo instante são observações diferentes |
+| `raw_state` | estado bruto verbatim de fonte estruturada | sim | — | obrigatório p/ `crm_status`; `None` p/ texto livre | sim | preservar CRM raw |
+| `signal` | o que a evidência afirma | não | mapeamento/julgamento | sim | sim | separa raw de interpretação |
+| `observed_at` | quando o fato ocorreu na fonte (tz-aware) | sim | — | sim | sim | temporalidade |
 
-`source` (8 valores, fechado):
+`observation_key` é um campo **genérico** (string); o valor é específico da fonte
+(ex.: `"stage"`, `"status"`, `"event:8812"`, `"row:14"`), mas o schema não conhece nenhum
+provedor.
 
-| Valor | Cobre |
-|---|---|
-| `crm_status` | stage/status estruturado do CRM, de qualquer card (inclusive paralelo) |
-| `crm_note` | nota/texto livre do CRM |
-| `closer_report` | retorno do closer (planilha, mensagem, relatório) |
-| `payment` | pagamento confirmado, reembolso, estorno |
-| `post_sale` | pós-venda, membership, onboarding, cancelamento de membership |
-| `automation` | Salesbot e qualquer ação automática |
-| `human` | decisão/confirmação de um operador |
-| `other` | válvula de escape |
+`source` (8, fechado): `crm_status`, `crm_note`, `closer_report`, `payment`, `post_sale`,
+`automation`, `human`, `other`. `parallel_card` = `crm_*` com `source_record_ref` de outro card;
+`membership` ∈ `post_sale`; `salesbot` ∈ `automation`.
 
-`parallel_card` não é fonte: é `crm_status`/`crm_note` com `source_record_ref` de outro card.
-`membership` está em `post_sale`. `salesbot` está em `automation`.
-
-`signal` (7 valores, fechado):
+`signal` (7, fechado):
 
 | Valor | Afirma |
 |---|---|
@@ -216,13 +227,63 @@ Três camadas, nunca misturadas:
 | `active` | negociação viva agora |
 | `deferral` | adiamento combinado |
 | `no_contact` | sem resposta / encerrado por falta de contato |
-| `reversal` | venda desfeita (reembolso, estorno, cancelamento) |
+| `reversal` | venda desfeita (reembolso, estorno, cancelamento) — **modificador**, não classe de outcome (§9.3) |
 | `unclassified` | estado observado sem significado canônico (ex. CRM "open", stage intermediário) |
 
-Mapeamento `raw_state` do CRM → `signal` é uma **tabela versionada**, de Gabriel (D-G1);
-estados não mapeados → `unclassified`.
+Mapeamento `raw_state` do CRM → `signal`: tabela versionada de Gabriel (DEP-3/D-G1); não
+mapeado → `unclassified`.
 
-### 6.1 Força da evidência (policy, não campo)
+### 7.2 Eligibility — `EvidenceDisposition` (rev. 2, P0-1)
+
+**Problema:** evidência é imutável e append-only; sem um registro de correção, a policy
+reconsumiria uma evidência errada (pagamento atribuído ao Deal errado; rejeição remapeada
+para no-contact) a cada nova avaliação.
+
+**Alternativas:**
+
+| Opção | Como | Veredito |
+|---|---|---|
+| A — só snapshot na avaliação | cada avaliação guarda o conjunto elegível; a próxima herda "snapshot anterior ∪ evidência nova" | rejeitada **sozinha**: invalidação vira omissão silenciosa (sem motivo, sem autor), e "evidência nova desde o snapshot" exige ordem de ingestão que o contrato não tem |
+| B — disposição explícita por evidência | registro append-only pequeno: "evidência X foi invalidada / remapeada para Y, por quem, quando" | **escolhida** para definir elegibilidade |
+| C — `supersedes_evidence_id` na própria evidência | remap vira nova evidência apontando a antiga | rejeitada: não representa invalidação pura (atribuição errada não tem substituta) sem inventar um sinal falso como "void" |
+
+**Escolha: B para definir, A para registrar.** `EvidenceDisposition` define elegibilidade;
+`OutcomeAssessment.eligible_evidence_ids` registra o snapshot usado (auditoria + CAS, §10).
+
+`EvidenceDisposition` (append-only, frozen):
+
+| Field | Purpose | Required? |
+|---|---|---|
+| `schema_version` | versionar | default |
+| `disposition_id` | determinístico sobre todos os campos de conteúdo (§11) | sim |
+| `evidence_id` | evidência afetada | sim |
+| `kind` | `invalidated` \| `remapped` | sim |
+| `replacement_evidence_id` | nova evidência com o sinal corrigido | ⟺ `remapped` |
+| `decided_by` | `human` \| `mapping` | sim |
+| `mapping_version` | versão da tabela DEP-3 que remapeou | ⟺ `decided_by="mapping"` |
+| `decided_at` | quando | sim, tz-aware |
+
+**Definições precisas:**
+
+- **Invalidated:** a evidência não deveria estar neste Deal ou não é uma observação válida
+  (atribuição errada, dado corrompido, card errado). Só `decided_by="human"`. Sem
+  substituta.
+- **Remapped (superseded):** a observação é válida, mas o `signal` estava errado. A
+  substituta tem **o mesmo** `deal_id`, `source`, `source_record_ref`, `observation_key`,
+  `raw_state` e `observed_at`, e `signal` diferente (logo `evidence_id` diferente, §11). Pode
+  ser `human` ou `mapping` (nova versão da tabela DEP-3).
+- **Eligible** (para um Deal, num momento) = evidências do Deal **sem nenhuma disposição**.
+- **Supporting** = subconjunto das elegíveis citado pela decisão como sustentação do status.
+
+Regras:
+
+- Nada é apagado: evidência e disposição ficam para auditoria.
+- No máximo **uma** disposição por evidência; uma segunda é **hard error**.
+- Disposição não é reversível em v0. Para "des-invalidar", um humano registra uma **nova**
+  evidência `source="human"` (novo `evidence_id`) — reinstauração explícita e auditável.
+- A policy **nunca** opera sobre "toda evidência já observada", só sobre o conjunto elegível.
+
+### 7.3 Força da evidência (policy, não campo)
 
 | source \ signal | sale | rejection | active / deferral | no_contact | reversal |
 |---|---|---|---|---|---|
@@ -234,336 +295,381 @@ estados não mapeados → `unclassified`.
 | `automation` | — | **proibido** (I6) | — | medium | — |
 | `other` | low | low | low | low | low |
 
-"—" = combinação não esperada; se ocorrer, força `low`. A tabela é versionada junto com a
-policy (`policy_version`). CRM "perdido" como `rejection` é `low` até Gabriel confirmar que
-fechamentos manuais de closer são confiáveis (D-G2).
+"—" = não esperado; se ocorrer, `low`. Versionada com a policy (`policy_version`).
 
-## 7. Canonical decision — `OutcomeAssessment`
+## 8. Canonical decision — `OutcomeAssessment` e autoridade
 
-| Field | Purpose | Observable? | Derived? | Required? | MVP? | Why |
-|---|---|---|---|---|---|---|
-| `schema_version` | versionar | — | — | default | sim | padrão |
-| `assessment_id` | identidade | — | sim (hash) | sim | sim | §11 |
-| `deal_id` | Deal avaliado | — | — | sim | sim | — |
-| `status` | outcome canônico | não | policy/humano | sim, **sem default** | sim | a resposta |
-| `evidence_ids` | evidências que sustentam | — | — | sim; ≥ 1 exceto `unknown` | sim | "qual evidência sustenta?" |
-| `confidence_level` | `high`/`medium`/`low` | não | policy | sim; `None` ⟺ `unknown` | sim | categórico, sem float (padrão de `CallDealMatch`) |
-| `needs_human_review` | decisão precisa de humano | não | policy | sim, **sem default** | sim | conflito/reversão |
-| `decision_method` | `rule` / `human` | sim | — | sim | sim | auditoria; human override |
-| `policy_version` | versão da policy + tabela de mapeamento | sim | — | ⟺ `rule` | sim | reproduzir e medir a regra |
-| `effective_at` | quando o outcome passou a valer no mundo | via evidência | julgamento | ⟺ `won`/`rejected` | sim | alinhar calls antes/depois do outcome |
-| `decided_at` | quando a decisão foi registrada | sim | — | sim | sim | auditoria; id |
-| `supersedes_assessment_id` | avaliação anterior substituída | — | — | `None` só na primeira | sim | currentness autoritativa (§8) |
-| `rejection_type` | — | — | — | — | **não** | §4.2 |
-| `closed_at` | — | — | — | — | **não** | substituído por `effective_at`; `Deal.closed_at` segue como estado da fonte |
-| score float | — | — | — | — | **não** | sem semântica |
-| `reviewed_by` | — | — | — | — | **não** | não há conceito de usuário no repo (mesma razão de `DEAL_MODEL.md`) |
+### 8.1 Schema discipline
 
-Pseudocódigo (**não implementado**):
-
-```python
-OutcomeStatus = Literal["won", "rejected", "open", "unknown"]
-EvidenceSource = Literal["crm_status", "crm_note", "closer_report", "payment",
-                         "post_sale", "automation", "human", "other"]
-EvidenceSignal = Literal["sale", "rejection", "active", "deferral",
-                         "no_contact", "reversal", "unclassified"]
-
-class OutcomeEvidence(BaseModel):          # frozen
-    schema_version: str = "1.0.0"
-    evidence_id: str
-    deal_id: str
-    source: EvidenceSource
-    source_record_ref: str
-    raw_state: str | None
-    signal: EvidenceSignal
-    observed_at: datetime                   # tz-aware
-
-class OutcomeAssessment(BaseModel):        # frozen
-    schema_version: str = "1.0.0"
-    assessment_id: str
-    deal_id: str
-    status: OutcomeStatus                   # sem default
-    evidence_ids: tuple[str, ...]
-    confidence_level: Literal["high", "medium", "low"] | None
-    needs_human_review: bool                # sem default
-    decision_method: Literal["rule", "human"]
-    policy_version: str | None
-    effective_at: datetime | None
-    decided_at: datetime
-    supersedes_assessment_id: str | None
-```
-
-### 7.1 Confidence semantics
-
-`confidence_level` é definido **exclusivamente** pelo algoritmo de §9 (fonte única de
-verdade): força (§6.1) da evidência de suporte mais forte do status escolhido. Evidência
-contrária **não rebaixa** a confiança; ela é tratada por §9 (regras 5–7: conflito ≥ medium →
-review; só `low` contraditória → `unknown`). `human` → `high`. `unknown` → `None` (não existe
-"confiança em não saber").
-Sem float: mesma razão de `CallDealMatch` — um número sem tabela de calibração não é auditável.
-
-### 7.2 Review semantics
-
-`needs_human_review` pertence à **avaliação**, não à evidência: é a decisão que está em
-dúvida. É `true` quando:
-
-1. evidências de força ≥ medium apontam para status diferentes (§9);
-2. existe `reversal` após `sale` (reembolso/cancelamento);
-3. uma avaliação `rule` encontraria status diferente de uma avaliação `human` vigente (§8);
-4. a cadeia de supersessão tem bifurcação (§8).
-
-Flag não bloqueia o status; bloqueia o **uso** em Outcome Intelligence se o consumidor exigir
-(`needs_human_review=false`) — recomendação: exigir.
-
-## 8. Temporal model
-
-Opção escolhida: **C — histórico append-only + atual derivado**, como `StageEvent` +
-`Deal.current_stage`, mas com **currentness autoritativa** (lição do DEP-1):
-
-- Toda mudança de interpretação é uma **nova** `OutcomeAssessment` com
-  `supersedes_assessment_id` = a avaliação vigente. Nada é atualizado in-place.
-- **Avaliação atual** de um Deal = a **única** avaliação não supersedida.
-  - 0 avaliações → sem outcome canônico (tratado como `unknown`, sem avaliação).
-  - ≥ 2 não supersedidas (bifurcação, escritas concorrentes) → **outcome atual
-    indisponível** + revisão. **Nunca** "a mais recente por `decided_at`".
-- Transições permitidas (nenhum status é absorvente):
-
-```
-unknown ⇄ open
-open → won | rejected
-rejected → open → won          (reabertura, exige evidência nova — I9)
-won → (won + needs_review)     (reversal; mudar status exige humano — D-G5)
-```
-
-`won`/`rejected` são **fechados**, não **terminais absorventes**: reabertura real acontece
-(rejeitou e voltou). Sair deles exige evidência nova observada após `effective_at` ou decisão
-`human` (I9).
-
-## 9. Conflict handling (adjudication policy)
-
-**Nenhuma fonte vence sempre.** Policy v0 (aplicada por `rule`):
-
-1. Considerar só evidências do Deal com sinal ≠ `unclassified`.
-2. Se existe evidência com `source="human"`: vale a de **`observed_at` mais recente** entre
-   elas (status implicado por seu sinal, confiança `high`, `needs_human_review=false`).
-   Duas ou mais `human` com o mesmo `observed_at` mais recente e sinais diferentes →
-   `unknown`, `needs_human_review=true`. Se o sinal vencedor for `no_contact` → `unknown`
-   (I6); se for `reversal` → regra 6. *Isto trata **evidência** de fonte humana (um operador
-   registrou uma observação). Uma **avaliação** `decision_method="human"` não passa por esta
-   policy — é escrita diretamente pelo humano e protegida por I10.*
-3. Senão, agrupar por status implicado (`sale`→won, `rejection`→rejected, `active`/`deferral`
-   →open; `no_contact` não implica status; `reversal` ver 6).
-4. Se só um status tem evidência ≥ medium → esse status, com a confiança da mais forte.
-5. Se ≥ 2 status têm evidência ≥ medium (conflito):
-   - `observed_at` iguais ou ordem indeterminável → `unknown`, `needs_human_review=true`,
-     citando ambas;
-   - senão, status da evidência ≥ medium **mais recente**, citando ambas, com
-     `needs_human_review=true` — **exceto** se essa mais recente for `high` (pagamento,
-     pós-venda, humano), caso em que `needs_human_review=false`.
-     Ex.: closer "rejeitou" 10/03 e pagamento 12/03 → `won` high, sem review; closer
-     "rejeitou" 10/03 e CRM "VENDA GANHA" 12/03 → `won` medium **com** review.
-6. *(override, ver ordem abaixo)* Se existe evidência `reversal` com `observed_at` posterior
-   a alguma evidência `sale` citada e o status candidato é `won`: mantém `won`,
-   `needs_human_review=true` (D-G5 decide se reembolso desfaz a venda). `reversal` sem
-   `sale` anterior não implica status; entra só como citação e força
-   `needs_human_review=true`.
-7. Só evidência `low` → status implicado com `low`; se `low` contraditórias → `unknown`.
-8. Avaliação `rule` nunca supersede uma `human` com status diferente: gera avaliação com o
-   **mesmo** status humano e `needs_human_review=true`.
-9. **Terminal:** se nenhum status tem evidência após os passos anteriores (ex.: só
-   `unclassified`, só `no_contact`/automação, ou nenhuma evidência) → `unknown`,
-   `confidence_level=None`, `needs_human_review=false`.
-
-**Ordem de avaliação (determinística):**
-
-1. **Status candidato** — passos **2, 4, 5, 7, 9**, nessa ordem; o primeiro que se aplica
-   define status, confiança e flag de revisão candidatos (passos 1 e 3 são preparação).
-2. **Overrides, sempre aplicados depois**, nessa ordem, sobre o candidato:
-   - passo **6** (reversal) — pode só **ligar** `needs_human_review`;
-   - passo **8** (avaliação `human` vigente com status diferente) — restaura o status humano
-     e liga `needs_human_review`.
-
-Overrides nunca desligam um `needs_human_review` já ligado. Se o passo 8 restaurar `won`, o
-passo 6 é reavaliado contra esse status final.
-
-| Conflito | Resultado v0 |
+| Estado | Detalhe |
 |---|---|
-| pagamento vs CRM open | `won` high (CRM open é `unclassified`) |
-| closer "rejeitou" vs Salesbot/CRM open | `rejected` medium (automação/CRM open não afirmam nada comercial) |
-| CRM won vs reembolso/cancelamento | `won` + review |
-| humano vs automação | humano |
-| CRM LOST vs closer "ainda negociando" (mais recente) | `open` medium (CRM lost é low) |
-| card A "VENDA GANHA" vs card B aberto | se ambos atribuídos ao mesmo Deal: `won` medium; se Deals diferentes: cada um avaliado — DEP-2 |
+| **CURRENT (rev. 1)** | `assessment_id`, `deal_id`, `status`, `evidence_ids`, `confidence_level`, `needs_human_review`, `decision_method`, `policy_version`, `effective_at`, `decided_at`, `supersedes_assessment_id`, `schema_version` |
+| **WHY IT FAILS** | (1) `evidence_ids` misturava "elegível" com "suporte" e não impedia reuso de evidência inválida (P0-1); (2) autoridade humana dependia de "o head é humano" e sumia após uma avaliação `rule` (P0-2); (3) override trocava só `status` (P0-3); (4) supersessão permitia bifurcação (P1) |
+| **MINIMAL NEW INFO** | renomear `evidence_ids` → `supporting_evidence_ids`; **+1 campo** `eligible_evidence_ids`; autoridade **derivada** da cadeia (zero campos); `supersedes_assessment_id` passa a ser o **expected head** do CAS (zero campos); + `EvidenceDisposition` (§7.2) |
 
-## 10. Deal / CRM card relationship
+### 8.2 Campos
 
-Hoje `deal_id = hash(company_id, source, external_id)`: **Deal = card**. A auditoria mostra
-que card ≠ oportunidade.
+| Field | Purpose | Required? | Why |
+|---|---|---|---|
+| `schema_version` | versionar | default | padrão |
+| `assessment_id` | identidade | sim | §11 |
+| `deal_id` | Deal avaliado | sim | — |
+| `status` | `won`/`rejected`/`open`/`unknown` | sim, sem default | a resposta |
+| `supporting_evidence_ids` | evidências que sustentam **este** status | sim; ≥ 1 exceto `unknown` | "qual evidência sustenta?" |
+| `eligible_evidence_ids` | snapshot do conjunto elegível usado nesta avaliação | sim (pode ser vazio) | auditoria; CAS de elegibilidade (§10) |
+| `confidence_level` | `high`/`medium`/`low` | `None` ⟺ `unknown` | categórico, sem float |
+| `needs_human_review` | esta decisão pede humano | sim, sem default | §9.4 |
+| `decision_method` | `rule` \| `human` | sim | autoridade (§8.3) |
+| `policy_version` | policy + tabela de força | ⟺ `rule` | reprodutibilidade |
+| `effective_at` | quando o outcome passou a valer no mundo | ⟺ `won`/`rejected` | alinhar calls antes/depois |
+| `decided_at` | quando foi registrada | sim | auditoria; id |
+| `supersedes_assessment_id` | **head esperado** no momento da escrita | `None` só na primeira | cadeia linear + CAS (§10) |
 
-- **v0 não muda `Deal`.** Outcome pertence ao `deal_id` (card) existente.
-- Evidência de outro card entra num Deal **só** por atribuição explícita (humana ou regra
-  documentada), com `source_record_ref` do card de origem — rastreável.
-- Cards paralelos com status conflitantes no **mesmo** Deal → §9.
-- Cards paralelos como **Deals distintos** da mesma pessoa/oportunidade: v0 não sabe que são
-  a mesma oportunidade; cada um tem seu outcome. Consolidar cards numa oportunidade canônica
-  é uma decisão arquitetural maior → **DEP-2** (fora desta task).
-- Card errado (evidência atribuída ao Deal errado): evidência é imutável; a correção é uma
-  nova avaliação que **não cita** a evidência errada (e, quando existir storage, a atribuição
-  errada é registrada como erro, nunca apagada).
+Rejeitados nesta revisão: `authority` armazenado (derivável), `candidate_*` paralelos
+(o candidato **é** a própria avaliação `rule`), `invalidated_evidence_ids` na avaliação
+(correção de evidência não é decisão de outcome).
 
-## 11. IDs
+### 8.3 Autoridade (P0-2, P0-3)
 
-Mesma técnica de `normalization/ids.py`/`domain/deal.py` (sha256 sobre `json.dumps(...,
-ensure_ascii=True, separators=(",", ":"))`, 24 hex, timestamps via `_canonical_timestamp`):
+Numa cadeia linear de avaliações de um Deal:
+
+> **Decisão autoritativa canônica** = a avaliação `decision_method="human"` **mais recente
+> na cadeia**, se existir; senão, o **head** (avaliação `rule` mais recente).
+
+Consequências:
+
+- **Autoridade humana persiste** até outra avaliação `human` a substituir. Avaliações `rule`
+  posteriores ficam na cadeia como **candidatos automáticos**: registram o que a policy
+  concluiu e se pede revisão, mas **não** governam o outcome.
+- Não existe "devolver autoridade à regra" em v0 (deferred): enquanto houver humano na
+  cadeia, só humano muda o canônico.
+- **Override é a decisão inteira:** o canônico é **um registro existente, inteiro** —
+  `status`, `supporting_evidence_ids`, `confidence_level`, `effective_at`,
+  `decision_method` e `needs_human_review` vêm todos do mesmo `OutcomeAssessment`. Nunca se
+  monta um candidato e se troca só o `status`.
+- **Revisão pendente** do Deal = `head.needs_human_review` (o candidato mais recente pode
+  pedir revisão de uma decisão humana vigente).
+- Visão de consumo de um Deal: `(canonical_decision, review_pending)`.
+- **Regra de consumo (hard, I16):** um outcome só é **utilizável** (Outcome Intelligence,
+  métricas, treino, qualquer analytics) se `review_pending = false`. Com revisão pendente, o
+  outcome do Deal é **indisponível para consumo** — a decisão canônica continua registrada
+  para auditoria, mas não é lida como verdade. Ex.: humano `won` + reembolso posterior →
+  canônico registrado `won`, **utilizável: não** até um humano decidir.
+- Decisão `human`: `needs_human_review=false`; `confidence_level="high"` (ou `None` se
+  `unknown`); `supporting_evidence_ids ⊆ eligible_evidence_ids` como qualquer outra; o
+  humano escolhe `effective_at` para `won`/`rejected`.
+
+## 9. Policy (`rule`) — máquina de estados
+
+Toda avaliação automática segue **exatamente** esta ordem. Nenhum resultado depende de ordem
+implícita.
+
+| # | Passo | Falha/saída |
+|---|---|---|
+| 1 | **Deal:** o `deal_id` existe (DEP-1/DEP-2 não são resolvidos aqui; card = Deal em v0) | Deal inexistente → erro, nada escrito |
+| 2 | **Head linear:** carregar a cadeia; verificar linearidade (cada avaliação supersede exatamente a anterior; um único head) | bifurcação → **canônico indisponível**; parar sem escrever; reparo manual (§10.2) |
+| 3 | **Autoridade:** avaliação `human` mais recente na cadeia, se houver | — |
+| 4 | **Conjunto elegível E:** evidências do Deal sem disposição | — |
+| 5 | **Validar evidências de E:** ids re-derivam; mesmo `deal_id`; I2 | inválida → hard error, parar |
+| 6 | **Seleção de outcome (candidato)** sobre E, §9.2 | → (status, supporting, confidence, effective_at) |
+| 7 | **Modificador de reversão** §9.3 | pode substituir o candidato por `unknown` |
+| 8 | **Revisão** §9.4 | → `needs_human_review` |
+| 9 | **Resolução de autoridade:** a nova avaliação é `rule`; se existe autoridade humana (passo 3), ela é **candidato não autoritativo**; senão, torna-se o canônico | — |
+| 10 | **No-op:** (a) se (status, supporting, confidence, effective_at, review, E, `policy_version`) do candidato = do head → não escrever; (b) se existe autoridade humana e E == `eligible_evidence_ids` da decisão humana (nada mudou desde que o humano decidiu) → não escrever | — |
+| 11 | **Validar invariantes** (§12) do novo registro contra E e a cadeia | violação → erro, nada escrito |
+| 12 | **Append atômico** com `supersedes_assessment_id = head` e `eligible_evidence_ids = E` (CAS, §10) | CONFLICT → recarregar, recomputar do passo 1 |
+
+### 9.1 Pré-filtro
+
+Dentro de E, descartar sinais `unclassified` para a seleção (continuam em E).
+
+### 9.2 Seleção de outcome (passo 6)
+
+Buckets: `sale`→`won`; `rejection`→`rejected`; `active`/`deferral`→`open`. `no_contact` e
+`reversal` **não** implicam status. Avaliar em ordem; o primeiro que se aplica decide:
+
+1. **Evidência de fonte humana:** se há evidência `source="human"` com sinal de bucket, vale
+   a de `observed_at` mais recente → status do bucket, `high`, supporting = essa evidência.
+   Empate de `observed_at` com buckets diferentes → `unknown`, revisão.
+2. **Um bucket só com evidência ≥ medium** → esse status; confidence = força da mais forte;
+   supporting = as evidências ≥ medium desse bucket.
+3. **Conflito (≥ 2 buckets com evidência ≥ medium):** ordem indeterminável (mesmo
+   `observed_at`) → `unknown` + revisão; senão, bucket da evidência ≥ medium mais recente,
+   supporting = as evidências ≥ medium de ambos os buckets, revisão **exceto** se a mais
+   recente for `high`.
+4. **Só evidência `low`:** um bucket → esse status `low`; buckets contraditórios →
+   `unknown`.
+5. **Terminal:** nenhum bucket com evidência → `unknown`, `confidence=None`, supporting vazio.
+
+`effective_at` do candidato `won`/`rejected` = `observed_at` da evidência de suporte **mais
+antiga do bucket vencedor** (em conflito, só as do bucket vencedor contam).
+
+`confidence_level` é definido **só** aqui; evidência contrária não o rebaixa.
+
+### 9.3 Reversal é modificador (passo 7, P0-4)
+
+`reversal` **não** é classe de outcome e **nunca** vira `rejected` (reembolso ≠ decisão de
+não comprar).
+
+| Caso | Condição (em E) | Candidato |
+|---|---|---|
+| A | existe `reversal` com `observed_at` posterior à `sale` mais recente | `unknown`, `confidence=None`, `effective_at=None`, supporting = essa `sale` + esse `reversal`, **revisão** |
+| C | existe `reversal` e nenhuma `sale` elegível anterior | `unknown`, revisão, supporting = o `reversal` |
+| — | `sale` posterior ao último `reversal` (recompra) | seleção normal (§9.2) |
+
+Caso B (autoridade humana existe): o modificador produz o candidato A/C normalmente; o
+passo 9 o registra como **não autoritativo**; a decisão humana continua canônica, com
+revisão pendente.
+
+Por quê `unknown` e não `won`: após reembolso, "a venda está de pé?" não é representável com
+segurança pela taxonomia v0. Estado `cancelled`/`refunded`/`churned` é **DEFERRED** (D-G5).
+
+### 9.4 Revisão (passo 8)
+
+**Sem autoridade humana:** `needs_human_review = true` se qualquer um de 1–2 abaixo.
+
+**Com autoridade humana:** só há avaliação `rule` se E mudou desde a decisão humana (passo
+10b). Então `needs_human_review = true` se: critério 4; **ou** critério 1, 2 ou 3 **causado por
+pelo menos uma evidência nova** — elegível agora e ausente de `eligible_evidence_ids` da
+decisão humana (para 3: presente em `supporting_evidence_ids` do candidato). O que o humano já
+viu não reabre revisão: ex. humano `won` após reembolso; chega uma observação nova
+`unclassified` → candidato ainda `unknown` pelo mesmo reembolso → **sem** revisão.
+
+Critérios:
+
+1. conflito em §9.2 (item 1 com empate, ou item 3);
+2. modificador de reversão aplicado (§9.3);
+3. existe autoridade humana e o candidato difere dela em `status`;
+4. existe autoridade humana e alguma evidência em `supporting_evidence_ids` **dela** não está
+   mais em E (evidência citada pelo humano foi invalidada/remapeada).
+
+Senão, `false`. Nunca "desligado" por um passo posterior.
+
+## 10. Concorrência e linearidade (P1)
+
+### 10.1 CAS
+
+- Histórico de avaliações é **linear** por Deal. Sem branching em v0.
+- Toda escrita declara `supersedes_assessment_id` = **head esperado** (`None` se a cadeia
+  está vazia).
+- A escrita só é aceita se:
+  1. head esperado == head atual; **e**
+  2. `eligible_evidence_ids` == conjunto elegível atual (nenhuma evidência/disposição nova
+     desde a leitura).
+- Caso contrário → **CONFLICT**: operação rejeitada antes de persistir; o caller recarrega,
+  recomputa (passo 1) e tenta de novo.
+- Aplica-se a `rule` **e** `human`.
+- **Protocolo humano:** a decisão humana é preparada contra um snapshot (head H, conjunto
+  elegível E) mostrado ao humano e gravada com esses H e E. Em CONFLICT, a decisão humana
+  **não** é recomputada nem reaplicada automaticamente (a policy §9 é só para `rule`): ela é
+  rejeitada e devolvida ao humano com o novo head e o novo E, e ele decide de novo
+  (inclusive reenviar o mesmo bundle, que é revalidado contra o novo E — I12).
+- Append de evidência e de disposição **não** fazem CAS na cadeia de avaliações; apenas
+  disparam reavaliação. A condição 2 garante que nenhuma avaliação seja gravada com base em
+  evidência já invalidada.
+
+Ex.: duas avaliações partem do head A. A primeira grava `A → B`. A segunda tenta `A → C`:
+head atual é B ≠ A → CONFLICT; recarrega B, recomputa; grava `B → C'` ou no-op.
+
+### 10.2 Fork legado / corrompido
+
+Se uma bifurcação aparecer (importação, bug, dado legado):
+
+- canônico = **indisponível**;
+- o resolver automático **não** escolhe vencedor (nem por timestamp);
+- reparo humano/manual fora do contrato.
+
+Reconciliação multi-parent: **DEFERRED**.
+
+## 11. IDs (P0-5)
+
+Mesma técnica do repo (sha256 sobre `json.dumps(..., ensure_ascii=True, separators=(",",
+":"))`, 24 hex, timestamps via `_canonical_timestamp`):
 
 ```
-evidence_id   = "oev_" + h(["outcome_evidence", deal_id, source, source_record_ref, signal, ts(observed_at)])
-assessment_id = "oas_" + h(["outcome_assessment", deal_id, status, sorted(evidence_ids),
-                            decision_method, supersedes_assessment_id, ts(decided_at)])
+raw_digest    = sha256_hex_lower(utf8_bytes(raw_state)) se raw_state não é None, senão ""
+evidence_id   = "oev_" + h(["outcome_evidence", deal_id, source, source_record_ref,
+                            observation_key, raw_digest, signal, ts(observed_at)])
+assessment_id = "oas_" + h(["outcome_assessment", deal_id, status,
+                            sorted(supporting_evidence_ids), sorted(eligible_evidence_ids),
+                            confidence_level, needs_human_review, decision_method,
+                            policy_version, ts_or_null(effective_at), ts(decided_at),
+                            supersedes_assessment_id])
+disposition_id = "odp_" + h(["evidence_disposition", evidence_id, kind,
+                             replacement_evidence_id, decided_by, mapping_version,
+                             ts(decided_at)])
 ```
 
-- Redelivery idêntica colapsa; nova observação (outro `observed_at`) é nova evidência.
-- `signal` no id: re-mapear o mesmo estado bruto com uma tabela nova gera **nova** evidência
-  (a antiga fica, citada pelas avaliações antigas com seu `policy_version`). Aceito: mantém
-  imutabilidade.
-- Sem PII no hash (`source_record_ref` é id opaco).
+- Stage `"NEGOCIAÇÃO"` e status `"ABERTO"` do mesmo card no mesmo instante: `observation_key`
+  (`"stage"` × `"status"`) e `raw_digest` diferem → ids diferentes.
+- `raw_state` entra só como digest (sem texto no id).
+- `signal` entra no id: remap gera nova evidência (e disposição da antiga, §7.2).
+- **Regra geral (as três entidades):** o id é o hash de **todos** os campos de conteúdo do
+  registro (tudo exceto o próprio id e `schema_version`), em ordem fixa; `None` serializado
+  como `null`. Nenhum campo de conteúdo fica fora do hash. Logo:
+  - **mesmo `evidence_id` + payload idêntico** → redelivery idempotente (no-op);
+  - **mesmo `evidence_id` + payload diferente** → **HARD ERROR**, nunca tratado como
+    redelivery (indica bug de ingestão ou colisão); nada é gravado.
+- A comparação de payload na chegada inclui `schema_version`: mesmo id com
+  `schema_version` diferente também é hard error (migração nunca reusa id em silêncio).
+- Retry após CONFLICT recomputa e gera novo registro; se o conteúdo recomputado for idêntico
+  ao já gravado (mesmo id), é idempotente.
 - Deal/Call/Lead/StageEvent/CallDealMatch ids inalterados.
 
 ## 12. Invariants
 
-| # | Invariante | Onde | Por quê |
-|---|---|---|---|
-| I1 | Evidence e Assessment são frozen e append-only | modelo + write path | auditabilidade |
-| I2 | `raw_state` obrigatório para `source="crm_status"`; nunca texto livre | modelo | preservar CRM raw sem PII |
-| I3 | timestamps tz-aware; `effective_at ≤ decided_at` | modelo | mesmo padrão de `Deal` |
-| I4 | `won` exige ≥ 1 `sale`; `rejected` ≥ 1 `rejection`; `open` ≥ 1 `active`/`deferral`; entre `evidence_ids` | cross-object (write path) | status sustentado por evidência |
-| I5 | `confidence_level is None` ⟺ `status == "unknown"` | modelo | sem confiança em "não sei" |
-| I6 | `no_contact` e `source="automation"` nunca sustentam `rejected` | cross-object | ponto central da auditoria |
-| I7 | `effective_at` obrigatório ⟺ `won`/`rejected` | modelo | espelha `Deal.closed_at`; `unknown` não tem data de fechamento |
-| I8 | `policy_version` obrigatório ⟺ `decision_method == "rule"` | modelo | reprodutibilidade |
-| I9 | sair de `won`/`rejected` exige evidência nova (`observed_at > effective_at`) ou `decision_method == "human"` | cross-object | reabertura real, não oscilação |
-| I10 | avaliação `rule` não muda o status de uma `human` vigente | cross-object | human override |
-| I11 | currentness = única não supersedida; bifurcação → indisponível | cross-object | lição DEP-1 |
-| I12 | todas as `evidence_ids` pertencem ao mesmo `deal_id` | cross-object | integridade |
-| I13 | ids re-derivados e validados | modelo | padrão do repo |
+| # | Invariante | Onde |
+|---|---|---|
+| I1 | Evidence, Disposition e Assessment são frozen e append-only; nada é apagado | modelo + write path |
+| I2 | `raw_state` obrigatório p/ `crm_status`; nunca texto livre; `observation_key` não vazio | modelo |
+| I3 | timestamps tz-aware; `effective_at ≤ decided_at` | modelo |
+| I4 | `won` exige ≥ 1 `sale` em supporting; `rejected` ≥ 1 `rejection`; `open` ≥ 1 `active`/`deferral` | write path |
+| I5 | `confidence_level is None` ⟺ `status == "unknown"` | modelo |
+| I6 | `no_contact`, `reversal` e `source="automation"` nunca sustentam `rejected` | write path |
+| I7 | `effective_at` obrigatório ⟺ `won`/`rejected` | modelo |
+| I8 | `policy_version` ⟺ `rule`; `mapping_version` ⟺ disposição `mapping` | modelo |
+| I9 | uma avaliação que **se torna canônica** saindo de `won`/`rejected` exige: evidência elegível nova com `observed_at > effective_at` anterior, **ou** remoção (disposição) de evidência de suporte anterior, **ou** `decision_method="human"` | write path |
+| I10 | com autoridade humana na cadeia, avaliação `rule` nunca é canônica (§8.3) | derivação |
+| I11 | cadeia linear; escrita só com CAS (§10); fork → canônico indisponível | write path |
+| I12 | `supporting_evidence_ids ⊆ eligible_evidence_ids`; todas do mesmo `deal_id` | write path |
+| I13 | ids re-derivados e validados; mesmo id + payload diferente = hard error | modelo + write path |
+| I14 | no máximo uma disposição por evidência; `remapped` exige substituta com mesma observação e `signal` diferente; `invalidated` só `human` | write path |
+| I15 | `human` ⇒ `needs_human_review=false` e `confidence_level ∈ {high, None}` | modelo |
+| I16 | outcome só é consumível (analytics/Outcome Intelligence) se `head.needs_human_review = false` e a cadeia é linear; senão, indisponível para consumo | leitura |
 
-Checagens "cross-object" exigem o conjunto de evidências/avaliações: ficam no write path
-futuro (mesma posição de TD-07/TD-09), não no modelo isolado.
+"Write path" = requer o conjunto (cadeia/evidências); fica para a camada de persistência
+futura (mesma posição de TD-07/TD-09).
 
 ## 13. Outcome ≠ Objection
 
-- `ObjectionEpisode.resolution_status` é **in-call**; `OutcomeAssessment.status` é do **Deal**.
-- Objeção `resolved` + deal `rejected` e objeção `unresolved` + deal `won` são ambos válidos.
-- Nenhum campo de um referencia o outro. A relação é **análise** (Outcome Intelligence), não
-  schema. Nenhuma alteração no proposal de `ObjectionEpisode`.
+- `ObjectionEpisode.resolution_status` é **in-call**; o outcome canônico é do **Deal**.
+- Objeção `resolved` + deal `rejected` e objeção `unresolved` + deal `won` são válidos.
+- Nenhum campo de um referencia o outro; a relação é análise, não schema.
 
 ## 14. Dependencies
 
-- **DEP-1 (existente)** — resolver autoritativo do match Call↔Deal atual. Outcome **não**
-  resolve DEP-1. Outcome Intelligence só usa evidência de Call quando o linkage Call → Deal
-  for autoritativo; até lá, outcomes existem por Deal, mas não se juntam a calls.
-- **DEP-2 (nova)** — consolidação de cards/registros do CRM numa oportunidade canônica
-  (card ≠ oportunidade). Decisão arquitetural; fora desta task.
-- **DEP-3 (nova)** — tabela de mapeamento de estados brutos do CRM → `signal`, versionada,
-  definida por Gabriel. **Inclui atribuição de autoria:** I6 depende de saber se um
-  fechamento no CRM foi feito por automação ou por uma pessoa. Se o Kommo não distinguir isso
-  de forma confiável (fechamento do Salesbot e manual podem parecer iguais), esse estado
-  bruto mapeia para `unclassified`/`no_contact`, **nunca** `rejection` — a atribuição de fonte
-  pode ser tão pouco confiável quanto o motivo de perda que ela substitui.
-- Storage/write path (TD-07/TD-09) — invariantes cross-object e unicidade.
+- **DEP-1 (existente)** — resolver autoritativo do match Call↔Deal atual. Não resolvido
+  aqui. Outcome opera só sobre um Deal existente; Outcome Intelligence só junta evidência de
+  Call quando o linkage Call → Deal for autoritativo.
+- **DEP-2 (nova)** — consolidação de cards do CRM numa oportunidade canônica.
+- **DEP-3 (nova)** — tabela estado bruto do CRM → `signal`, versionada (Gabriel), incluindo
+  atribuição automação × pessoa: se o Kommo não distinguir, o estado mapeia para
+  `unclassified`/`no_contact`, **nunca** `rejection`. Nova versão da tabela = disposições
+  `remapped` com `decided_by="mapping"`.
+- **Persistência/write path** — CAS da cadeia, unicidade de disposição por evidência (I14, sem CAS próprio: constraint de unicidade no storage), invariantes cross-object (TD-07/TD-09).
 
-## 15. Edge cases
+### 14.1 Deal / CRM card
 
-| Caso | Tratamento |
-|---|---|
-| Explicit rejection ("não vou comprar") | `rejection` (closer/humano) → `rejected` |
-| No-contact | `no_contact` → `unknown`, nunca `rejected` |
-| Salesbot closure | `automation`/`no_contact`; CRM "perdido" gerado pelo bot também é `no_contact` via mapeamento → `unknown` |
-| CRM WON + pagamento | `won` high |
-| CRM OPEN + pagamento | `won` high (CRM open é `unclassified`) |
-| CRM LOST + closer "ainda negociando" | `open` medium (CRM "perdido" é `low` até D-G2; só o closer é ≥ medium → §9 regra 4). Se D-G2 subir CRM "perdido" para medium → conflito → §9 regra 5 |
-| Cards duplicados conflitantes | mesmo Deal → §9; Deals distintos → DEP-2 |
-| Follow-up com data futura | `deferral` → `open`; data não armazenada (D-G7) |
-| "Volta no próximo trimestre" | `deferral` → `open` (salvo D-G4) |
-| Reembolso após venda | `reversal` → `won` + review (D-G5) |
-| Cancelamento após pagamento | idem |
-| Card errado | nova avaliação sem a evidência errada (§10) |
-| Unknown | status legítimo, `confidence_level=None` |
-| Evidência insuficiente | só `low` contraditória ou `unclassified` → `unknown` |
-| Human override | `decision_method="human"`; `rule` não reverte (I10) |
-| Reabertura após rejeição | nova evidência `active`/`sale` posterior → `open`/`won` supersedendo (I9) |
-| Deal sem nenhuma evidência | sem avaliação; consumidores tratam como `unknown` |
+- Hoje `deal_id = hash(company_id, source, external_id)`: **Deal = card**. v0 não muda `Deal`.
+- Evidência de outro card entra num Deal **só** por atribuição explícita (humana ou regra
+  documentada), com `source_record_ref` do card de origem.
+- Cards conflitantes atribuídos ao **mesmo** Deal → conflito normal (§9.2-3).
+- Cards paralelos como **Deals distintos**: cada um tem seu outcome; v0 não sabe que são a
+  mesma oportunidade → DEP-2.
+- Card errado: disposição `invalidated` (§7.2); nada é apagado.
+
+## 15. Scenario matrix
+
+Abreviações: E = eligible evidence; cand. = candidato automático; aut. = decisão autoritativa;
+rev. = `needs_human_review` do head; canônico = outcome final.
+Toda linha com Rev. = **sim** tem o canônico **registrado mas não utilizável** para consumo até
+revisão humana (I16).
+
+| # | Cenário | E | Cand. | Aut. | Rev. | Canônico |
+|---|---|---|---|---|---|---|
+| 1 | CRM OPEN only | {crm open → `unclassified`} | `unknown` (§9.2-5) | rule | não | `unknown` |
+| 2 | CRM LOST por Salesbot | {`no_contact`} | `unknown` (I6) | rule | não | `unknown` |
+| 3 | Rejeição comercial explícita (closer) | {`rejection` medium} | `rejected` medium | rule | não | `rejected` |
+| 4 | Pagamento com CRM OPEN | {`sale` high, `unclassified`} | `won` high | rule | não | `won` |
+| 5 | Pagamento atribuído errado → invalidado | antes {P}; depois {} | antes `won`; depois `unknown` (I9: suporte removido) | rule | não | `unknown` |
+| 6 | Rejeição remapeada p/ no-contact | {`no_contact`} (rejeição com disposição `remapped`) | `unknown` | rule | não | `unknown` |
+| 7 | Humano REJECTED → automação vê `active` posterior | {rejection, active} | `open` medium | human (REJECTED) | **sim** (§9.4-3) | `rejected` |
+| 8 | Humano UNKNOWN → pagamento aparece | {…, `sale` high} | `won` high | human (UNKNOWN) | **sim** | `unknown` |
+| 9 | Humano WON → reembolso | {`sale`, `reversal`} | `unknown` (§9.3-A) | human (WON) | **sim** | `won` |
+| 10 | Pagamento → reembolso → humano revisa | {`sale`, `reversal`} | antes: `unknown` + rev.; depois do humano: nenhuma avaliação `rule` nova enquanto E não mudar (passo 10b) | antes rule; depois human | antes sim; depois não (head = decisão humana) | antes `unknown` (não utilizável); depois o bundle humano, utilizável (tipicamente `won` ou `unknown`; `rejected` só com evidência `rejection`, I4) |
+| 11 | Duas avaliações simultâneas a partir de A | — | — | — | — | primeira `A→B`; segunda CONFLICT, recarrega B, recomputa (§10.1) |
+| 12 | Stage e status do mesmo card, mesmo instante | 2 evidências distintas (`observation_key`, `raw_digest`) | conforme sinais (ambas `unclassified` → `unknown`) | rule | não | `unknown` |
+| 13 | Mesma evidência reenviada idêntica | inalterado | no-op | — | — | inalterado |
+| 14 | Mesmo `evidence_id`, payload diferente | inalterado | — | — | — | **hard error**; nada gravado |
+| 15 | Cards paralelos discordam | Deals distintos: cada um seu E (DEP-2). Mesmo Deal (atribuição explícita): ex. {`sale` medium, `rejection` medium} | mesmo Deal: bucket da mais recente (§9.2-3) | rule | sim (conflito medium) | ex. `won` medium com revisão |
+| 16 | Nenhuma evidência elegível | {} | `unknown` | rule | não | `unknown` |
+| 17 | Toda evidência anterior invalidada | {} | `unknown` | rule → canônico `unknown`; se havia humano → human | rule: não; human: **sim** (§9.4-4) | rule: `unknown`; human: bundle humano mantido |
+| 18 | Follow-up futuro com data | {`deferral`} | `open` | rule | não | `open` (data não armazenada, D-G7) |
+| 19 | Rejected reaberto de verdade | {`rejection` medium, `active` medium posterior (closer)} | `open` medium (I9: evidência nova; §9.2-3 conflito) | rule | **sim** (conflito medium; seria não só se a evidência nova fosse `high`, ex. pagamento/humano) | `open`, **não utilizável** até revisão (I16) |
+| 20 | Match Call↔Deal errado corrigido | evidência de outcome é do Deal; se alguma veio atribuída pela call errada → disposição `invalidated` (→ #5) | conforme E | — | — | outcome não muda por si; só o join de Outcome Intelligence (DEP-1) |
 
 ## 16. Evaluation (medir contra julgamento humano)
 
-- **Amostra:** Deals com pacote de evidências; dois operadores rotulam **cegos** à saída da
-  regra, a partir do mesmo pacote.
-- **O que o anotador vê:** por evidência, `source`, `raw_state`, `observed_at` e acesso ao
-  registro de origem via `source_record_ref` — **não** o `signal` mapeado.
-- **O que o anotador rotula:** (a) o `signal` de cada evidência — avalia o mapeamento
-  (DEP-3/D-G1); (b) o `status` do Deal e se precisaria de revisão — avalia o resultado ponta a
-  ponta. Para isolar a policy de §9, a regra também é executada sobre os **sinais do
+- **Amostra:** Deals com pacote de **evidências elegíveis**; dois operadores rotulam **cegos**
+  à saída da regra.
+- **O anotador vê:** por evidência, `source`, `raw_state`, `observed_at` e o registro de
+  origem via `source_record_ref` — **não** o `signal` mapeado.
+- **O anotador rotula:** (a) `signal` de cada evidência (avalia DEP-3); (b) `status` do Deal
+  e se precisaria de revisão (ponta a ponta). A regra também roda sobre os **sinais do
   anotador** (policy-only).
-- **Métricas:** **uma matriz 4×4 por anotador** (regra × anotador A, regra × anotador B),
-  nunca uma coluna "humano" colapsada; concordância humano × humano separada (kappa; N/A
-  quando indefinido); taxa crítica **no-contact classificado como `rejected`** (deve ser 0 por I6 —
-  é a métrica que pega um mapeamento DEP-3 que atribua fechamento de automação a pessoa); precisão/recall de `needs_human_review` contra "humanos discordam
-  da regra ou entre si".
-- **Auditoria:** toda avaliação cita evidências + `policy_version` → qualquer rótulo é
-  reproduzível.
-- Sem thresholds agora; definidos após o piloto (mesma postura do D3 de AC-47).
+- **Métricas:** uma matriz 4×4 **por anotador** (regra × A, regra × B), nunca coluna
+  "humano" colapsada; kappa humano × humano (N/A quando indefinido); taxa crítica
+  **no-contact/automação/reversal classificado como `rejected`** (deve ser 0 por I6);
+  precisão/recall de `needs_human_review` contra "humanos discordam da regra ou entre si".
+- **Auditoria:** toda avaliação cita `supporting_evidence_ids`, `eligible_evidence_ids` e
+  `policy_version` → reproduzível.
+- Sem thresholds agora.
 
 ## 17. Rejected alternatives
 
 | Alternativa | Por que não |
 |---|---|
-| Estender `Deal.outcome` (novos valores/campos) | mistura source state e canônico no mesmo campo; exige re-emitir snapshot; quebra o contrato atual |
+| Estender `Deal.outcome` | mistura source state e canônico; quebra o contrato atual |
 | Só estado atual, sem histórico | não audita reabertura, reembolso, override |
-| Precedência fixa por fonte | a auditoria mostra que qualquer fonte erra; conflito → review |
-| "Mais recente por timestamp" como atual | mesma falha do DEP-1; substituído por supersessão |
-| `FUTURE` como status | sub-estado de `open`; regras de transição sem ganho |
-| `STALE` / `stale_candidate` como status | silêncio ≠ abandono; regra não validada |
-| `rejection_type` | motivo não confiável; duplica objeções |
-| `confidence_score` float | sem calibração |
-| confiança/revisão por evidência | força é policy; revisão é da decisão |
-| `crm_stage_raw` + `crm_status_raw` como campos no Deal | exigiria mudar Deal; `raw_state` por evidência cobre os dois |
-| Status `lost` | ambíguo com CRM; `rejected` é explícito |
+| Precedência fixa por fonte | qualquer fonte erra; conflito → review |
+| "Mais recente por timestamp" como atual | falha do DEP-1; cadeia linear + CAS |
+| Branching/multi-parent history | complexidade sem necessidade em v0; fork → indisponível |
+| Apagar/mutar evidência para corrigir | destrói auditoria (§7.2) |
+| Policy sobre toda evidência já observada | reconsumiria evidência inválida (P0-1) |
+| Autoridade = "head é humano" | some após uma avaliação `rule` (P0-2) |
+| Override trocando só `status` | registros impossíveis, ex. `unknown` + `high` (P0-3) |
+| `reversal` → `rejected` | reembolso ≠ decisão de não comprar |
+| `FUTURE`, `STALE`, `lost` como status | §4 |
+| `rejection_type`, float de confiança | §4.2, §8 |
+| Campo `authority` armazenado | derivável da cadeia |
 
 ## 18. Deferred
 
-`rejection_type`; data de retomada; `stale_candidate` derivado; consolidação de cards (DEP-2);
-valor/receita realizada e parcial; `reviewed_by`; política de janela de reembolso; ligação
-Outcome ↔ Call (DEP-1).
+`rejection_type`; data de retomada; `stale_candidate`; estado `cancelled`/`refunded`/
+`churned`; devolução de autoridade humana à regra; reinstauração direta de evidência
+disposta; reconciliação multi-parent; consolidação de cards (DEP-2); valor/receita
+realizada; `reviewed_by`; ligação Outcome ↔ Call (DEP-1).
 
 ## 19. Open decisions
 
 | # | Decisão | Recomendação | Dono |
 |---|---|---|---|
-| D-M1 | `Deal.outcome`/`closed_at` passam a ser documentados como projeção do estado do CRM (sem mudar código) | aprovar; docstring de `deal.py` e `DEAL_MODEL.md` atualizados só na implementação | Matheus |
-| D-M2 | Duas entidades novas (`OutcomeEvidence`, `OutcomeAssessment`) com supersessão | aprovar | Matheus |
-| D-M3 | FUTURE = `open` + `deferral` | aprovar | Matheus (+ Gabriel via D-G4) |
-| D-M4 | DEP-2 (card ≠ oportunidade) fora desta task, com task própria | aprovar | Matheus |
+| D-M1 | `Deal.outcome`/`closed_at` documentados como projeção do estado do CRM (sem mudar código) | aprovar; docs atualizados só na implementação | Matheus |
+| D-M2 | Três entidades append-only: `OutcomeEvidence`, `EvidenceDisposition`, `OutcomeAssessment` | aprovar | Matheus |
+| D-M3 | FUTURE = `open` + `deferral` | aprovar | Matheus (+ D-G4) |
+| D-M4 | DEP-2 fora desta task | aprovar | Matheus |
 | D-M5 | Implementar após D-G1/D-G2 | sim | Matheus |
-| D-M6 | ADR (contrato entre módulos) como primeiro passo da implementação | sim | Matheus |
-| D-G1 | Tabela estado bruto do Kommo → `signal` (quais estados = venda, rejeição, adiamento, automação) | — | Gabriel |
-| D-G2 | CRM "perdido" fechado manualmente pelo closer é confiável como `rejection`? | manter `low` até confirmar | Gabriel |
-| D-G3 | Ghosting/no-contact deve contar como perda em analytics (rótulo derivado)? | status canônico continua `unknown` | Gabriel |
-| D-G4 | "PROPOSTA FUTURA" é oportunidade viva ou perda? | `open` + `deferral` | Gabriel |
-| D-G5 | Reembolso/cancelamento desfaz a venda? Em qual janela? | review manual até definir | Gabriel |
-| D-G6 | CRM "VENDA GANHA" sozinho basta para `won`? | sim, `medium` | Gabriel |
-| D-G7 | Precisa de data de retomada no v0? | não | Gabriel |
-| D-G8 | Regra de `stale_candidate` (dias sem evidência) | não definir agora | Gabriel |
+| D-M6 | ADR como primeiro passo da implementação | sim | Matheus |
+| D-M7 | Autoridade humana persiste sem mecanismo de devolução à regra em v0 | aprovar | Matheus |
+| D-M8 | Histórico linear com CAS; fork → indisponível + reparo manual | aprovar | Matheus |
+| D-G1 | Tabela estado bruto do Kommo → `signal` (incl. automação × pessoa) | — | Gabriel |
+| D-G2 | CRM "perdido" manual é confiável como `rejection`? | `low` até confirmar | Gabriel |
+| D-G3 | Ghosting conta como perda em analytics (rótulo derivado)? | canônico segue `unknown` | Gabriel |
+| D-G4 | "PROPOSTA FUTURA" é viva ou perda? | `open` + `deferral` | Gabriel |
+| D-G5 | Reembolso/cancelamento: que estado comercial é? Janela? | v0: `unknown` + revisão; estado próprio deferred | Gabriel |
+| D-G6 | "VENDA GANHA" sozinho basta para `won`? | sim, `medium` | Gabriel |
+| D-G7 | Data de retomada no v0? | não | Gabriel |
+| D-G8 | Regra de `stale_candidate` | não definir agora | Gabriel |
 
 ## 20. Definition of Done (desta proposta)
 
 - [x] Auditoria de `Deal.outcome`, `closed_at`, `StageEvent`, matching, premissas de CRM.
-- [x] Semântica de won/rejected/open/unknown; FUTURE e STALE decididos.
-- [x] Raw vs sinal vs canônico separados.
-- [x] Evidence contract, confiança, revisão.
-- [x] Modelo temporal com currentness autoritativa.
-- [x] Policy de conflito sem precedência cega.
-- [x] Deal vs card; DEP-1/DEP-2/DEP-3.
-- [x] Invariantes, edge cases, avaliação.
-- [x] Review Domain / Architecture / Evaluator: APPROVE (Domain e Evaluator após correções em §7.1, §9, §14, §16).
+- [x] Semântica won/rejected/open/unknown; FUTURE e STALE decididos.
+- [x] Raw observation / evidence / eligible / supporting / candidate / authoritative separados.
+- [x] Elegibilidade por disposição (P0-1); autoridade humana persistente (P0-2); decisão
+      inteira (P0-3); reversal como modificador (P0-4); identidade da observação (P0-5);
+      cadeia linear com CAS (P1).
+- [x] Máquina de estados explícita; matriz de 20 cenários.
+- [x] Review State & Audit / Concurrency & Invariants / Domain (rev. 2): APPROVE (após correções em §8.3, §9.4, §10.1, §11, §15, I16).
 - [ ] D-M*, D-G* decididos.
 - [ ] (Próxima task) ADR + implementação.
