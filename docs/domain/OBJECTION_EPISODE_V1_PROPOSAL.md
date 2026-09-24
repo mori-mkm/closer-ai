@@ -1,6 +1,6 @@
 # ObjectionEpisode v1 — Proposal (AC-47)
 
-Status: **PROPOSAL rev. 3 — não implementado.** Nenhum código muda com este documento.
+Status: **PROPOSAL rev. 4 — não implementado.** Nenhum código muda com este documento.
 Contrato vigente continua sendo `ObjectionEvent` v0 (`docs/domain/OBJECTION_MODEL.md`,
 `src/closer_ai/domain/objection.py`).
 
@@ -13,6 +13,12 @@ Histórico de revisões:
   objeção partida (§5.3); condição de closure explícita (§5.1); matching
   maximum-cardinality-first (§12.2); `closer_segment_count` (§8); métricas com conjunto vazio
   (§12.6).
+- rev. 4: "aspecto" operacional para MIXED vs REJECT (§9.1); mesma categoria em fio aberto
+  (§4, §5.1); pinning da segmentação da Call de origem no run (§11, §12.0); parked threads,
+  on-topic funcional, logística e apartes de terceiros na closure (§5.1); ordem/invalidade
+  (§12.1); "terminou no fim da call" como julgamento (§11); `deal_id` só com MATCHED (§11);
+  métricas com gold vazio (§12.6); pendência como pergunta D6 (§9.1, §19). Schema continua
+  com 7 campos.
 
 Pergunta que este documento responde:
 
@@ -73,10 +79,25 @@ Invariantes de domínio:
   `CallDealMatch`, nunca campo do episódio.
 - **Uma categoria, um objetor.** Objetor = `speaker_id` da âncora; derivado.
 - **Objetor sempre `role="lead"`** na `Call` (TD-14: `unknown` nunca vira lead por inferência).
-- **Episódio = fio por (objetor, categoria), não por "preocupação".** Duas preocupações
-  distintas da mesma categoria no mesmo fio aberto (ex.: mensalidade e taxa de implantação,
-  ambas `price`) ficam no mesmo episódio. Separá-las exige subtipo/relação semântica —
-  deferred (§17).
+- **Episódio = fio por (objetor, categoria), não por "preocupação".** Enquanto o fio está
+  aberto ou parked (§5.1):
+  - nova **categoria** → novo episódio;
+  - novo **objetor** → novo episódio;
+  - mesma categoria + mesmo objetor → **continua no mesmo episódio**, mesmo que seja uma
+    manifestação específica nova da categoria.
+
+  Exemplo sintético (fio `price` aberto):
+
+  ```
+  s50 Lead:   "A mensalidade está ok."
+  s51 Closer: "Ótimo, e sobre a implantação..."
+  s52 Lead:   "Mas a taxa de implantação está alta."
+  ```
+
+  s52 entra em `context_segment_ids` do episódio `price` aberto; é uma resposta REJECT (a
+  preocupação da categoria continua ativa) → `unresolved`. **Não** é reabertura nem novo
+  episódio. Se o fio já tivesse fechado, s52 ancoraria um novo episódio (recorrência, §5.2).
+  Separar preocupações da mesma categoria exige subtipo/relação semântica — deferred (§17).
 - **Resolução é in-call e do objetor.** Não é outcome do Deal e não o prevê.
 
 ## 5. Boundary rules
@@ -98,22 +119,75 @@ Desempate geral: **na dúvida entre mesmo/novo episódio, mesmo episódio.**
 
 ### 5.1 Closure condition
 
-Um fio de objeção está **aberto** da âncora até fechar. Mantém-se mentalmente o conjunto de
-fios abertos da call.
+Estados conceituais de um fio (anotação mental, **nenhum campo armazenado**):
 
-**Closure:** um segmento **substantivo** (de qualquer participante) cujo assunto **não é
-nenhum dos fios abertos** e que **não expressa nova objeção** fecha **todos** os fios abertos
-naquele ponto. O fim da call também fecha todos.
+```
+OPEN ──(deferral explícito)──► PARKED ──(retomada)──► OPEN
+OPEN ──(closure)──► CLOSED
+PARKED ──(abandono explícito | fim da call)──► CLOSED
+```
 
-- **Substantivo** = tem conteúdo proposicional. Não são substantivos: interjeições e
-  backchannels ("ok", "tá", "uhum", "sim", "certo", "sim?"), cumprimentos, ruído.
-- Um segmento que expressa **nova objeção** abre um fio novo e **não** fecha os outros.
-- Alternar entre fios abertos (preço ↔ prazo) **não** fecha nenhum deles.
+Mantém-se mentalmente o conjunto de fios OPEN e PARKED da call.
 
-Por que "fecha todos" e não "só o abandonado": decidir qual fio foi abandonado exige julgar
-intenção por fio; "mudou para assunto fora de todos os fios abertos" é um único julgamento
-por segmento, mais anotável. Limitação aceita: um fio que o lead pretendia retomar depois de
-um desvio vira recorrência (§5.2), não o mesmo episódio.
+**Closure de fios OPEN:** um segmento **closure-relevant** (definição abaixo) cujo assunto
+**não é nenhum dos fios OPEN/PARKED** e que **não expressa nova objeção** fecha **todos** os
+fios OPEN naquele ponto. Fios PARKED **não** são fechados por isso. O fim da call fecha todos.
+
+**Closure é julgada em retrospecto** (mesmo princípio da âncora, §5.3): o assunto de um
+segmento é decidido olhando o que vem depois, não só a ordem de fala. Um segmento cujo
+assunto é, na sequência imediata (antes de qualquer outro segmento closure-relevant),
+retomado pelo objetor como preocupação da **mesma categoria** de um fio OPEN/PARKED faz parte
+desse fio — é contexto, não closure. Ex.: §4, s51 ("e sobre a implantação...") seguido de s52
+("Mas a taxa de implantação está alta.") → s51 é contexto do fio `price`, o fio não fechou.
+Se o que vem depois não retoma o fio, o segmento é closure-relevant.
+
+**Não são closure-relevant** (nunca fecham nada):
+
+1. **Não substantivos:** interjeições e backchannels ("ok", "tá", "uhum", "sim", "certo",
+   "sim?"), cumprimentos, ruído.
+2. **Logística da call:** "está me ouvindo?", "vou compartilhar a tela", "só um minuto",
+   "caiu o áudio", mesmo tendo conteúdo proposicional.
+3. **Apartes de terceiros que não mudam o fio comercial:** ex. "Preciso sair às 15h." de
+   outro participante, quando a conversa principal segue no mesmo assunto.
+4. **Segmentos que servem diretamente à resolução de um fio aberto** — são **on-topic** desse
+   fio, mesmo que superficialmente sobre outro assunto: perguntar volume para calcular ROI
+   diante de objeção de preço; mostrar tabela de preços; perguntar tamanho da implantação
+   para justificar o preço. Entram em `context_segment_ids` do fio que servem.
+
+**PARKED:** um **deferral explícito** sobre o fio — "vamos voltar nisso", "depois retomamos",
+"deixa eu responder isso depois", "vamos ver X primeiro e depois voltamos ao preço" — não
+fecha o fio; ele fica PARKED. Um fio PARKED continua sendo o mesmo episódio até ser:
+
+- **retomado** (qualquer participante volta ao assunto: volta a OPEN, mesmo episódio);
+- **explicitamente abandonado** ("esquece o preço, não é problema") → CLOSED;
+- ou **fim da call** → CLOSED.
+
+Deferral precisa ser explícito. Mudar de assunto sem anunciar retorno não é deferral.
+
+Outras regras:
+
+- Um segmento que expressa **nova objeção** (nova **categoria** ou novo **objetor**, §4)
+  abre um fio novo e **não** fecha os outros. Mesma categoria + mesmo objetor com fio
+  OPEN/PARKED **não** é nova objeção: é contexto desse fio (§4).
+- Alternar entre fios OPEN (preço ↔ prazo) **não** fecha nenhum deles.
+
+Counterexample resolvido (parked):
+
+```
+s60 Lead:   "Preço está alto."                                     → âncora price
+s61 Closer: "Vamos olhar implantação primeiro e depois volto no preço." → PARKED
+s62..s70    (discussão de implantação)                             → não fecha price
+s71 Closer: "Voltando ao preço, podemos parcelar."                 → retomada, contexto
+s72 Lead:   "Com esse parcelamento dá."                            → ACCEPT
+```
+
+Um episódio `price`: `objection_segment_ids = (s60)`, `context_segment_ids = (s61, s71, s72)`,
+`resolved`. s62..s70 não entram (não servem à resolução do preço).
+
+Por que "fecha todos os OPEN" e não "só o abandonado": decidir qual fio foi abandonado exige
+julgar intenção por fio; "mudou para assunto fora de todos os fios, sem deferral" é um único
+julgamento por segmento. Os casos em que isso fecha cedo demais são exatamente os que o D3
+inspeciona como `premature_closure` (§19).
 
 **Reversão imediata** (sem closure no meio) fica **no mesmo episódio**:
 
@@ -123,7 +197,8 @@ s21 Lead:   "Na verdade, incluindo imposto ainda fica caro."
 ```
 
 Mesmo episódio. Sem turno substantivo de outro entre s20 e s21, é **uma** resposta (§9.1)
-com revogação do mesmo aspecto → REJECT → `unresolved`. Se o closer tivesse falado algo
+com reafirmação da preocupação geral ("ainda fica caro"; imposto é nova causa, não aspecto,
+§9.1) → REJECT → `unresolved`. Se o closer tivesse falado algo
 substantivo entre elas, seriam duas respostas (ACCEPT, REJECT) e a última venceria (§9.2) —
 mesmo resultado. Não existe "episódio resolvido + novo episódio" sem closure entre as falas.
 
@@ -322,7 +397,7 @@ Julgado ao fim do episódio, **só com falas do objetor** dentro do episódio.
 |---|---|---|
 | **ACCEPT** | a preocupação é dada como atendida, ou próximo passo que pressupõe a objeção superada | "Esse desconto resolve completamente o problema de preço."; "Então pode mandar o contrato com esse valor." |
 | **REJECT** | a preocupação **persiste ou fica explicitamente em aberto**: rejeição da resposta, reiteração, ou pendência declarada | "Continua caro pra mim."; "Ainda preciso verificar se consigo pagar." |
-| **MIXED** | **dentro da mesma resposta**, aceita parte da preocupação **e** mantém uma preocupação residual sobre **outro aspecto** | "O preço total está ok, mas a entrada ainda não cabe." |
+| **MIXED** | **dentro da mesma resposta**, um aspecto claramente aceito **e** outro aspecto (definição operacional abaixo) pendente | "O preço total está ok, mas a entrada ainda não cabe." |
 | **NEUTRAL** | só reconhecimento, sem conteúdo sobre o ponto | "ok", "tá", "uhum", "sim", "certo" |
 | **OFF_CATEGORY** | só conteúdo sobre outro assunto | — |
 | **UNKNOWN** | há conteúdo sobre o ponto, mas não é interpretável (ilegível, ironia indecidível) | — |
@@ -338,23 +413,52 @@ B) s40 Lead: "O preço total está ok."
 Em B, não há turno substantivo de outro participante entre s40 e s41 → **uma** resposta.
 A e B → MIXED → `partially_resolved`.
 
-**Residual concern vs. later revocation:**
+**Aspecto (definição operacional):**
 
-- **Residual** = na **mesma resposta**, aspecto X aceito e aspecto Y (diferente) ainda
-  pendente → **MIXED**.
-- **Revogação dentro da mesma resposta** = o **mesmo aspecto** aceito e depois retirado
-  ("Resolve... não, na verdade ainda fica caro.") → rotular pela **posição final** sobre esse
-  aspecto → **REJECT**.
-- **Revogação posterior** = uma **resposta posterior** (após turno substantivo de outro)
-  contradiz uma anterior → não é MIXED; aplica-se a precedência temporal (§9.2).
+> Um **aspecto** é um subcomponente da preocupação comercial que pode ser satisfeito
+> **independentemente** de outro subcomponente.
 
-**"Ainda preciso verificar se consigo pagar."** — regra: declaração de que a preocupação
-**ainda está pendente** é persistência, não ausência de sinal.
+Exemplos de pares de aspectos distintos: mensalidade vs. taxa de implantação; preço total
+vs. entrada; prazo de contrato vs. cláusula de cancelamento.
 
-- Sozinha na resposta → **REJECT** → `unresolved`.
-- Na mesma resposta após aceitar outro aspecto ("O valor total está ok; ainda preciso
-  verificar se consigo pagar a entrada.") → **MIXED** → `partially_resolved`.
-- Nunca UNKNOWN: o conteúdo é interpretável (a preocupação está aberta).
+**Não** são aspectos distintos: uma **nova causa** para a mesma preocupação geral (desconto
+vs. imposto, quando o que o lead reafirma é "o preço continua caro"); o mesmo valor visto de
+outro ângulo ("por mês" vs. "no ano").
+
+**Regra de reafirmação:** se o objetor **reafirma a preocupação geral** — "continua caro",
+"ainda fica caro", "não cabe no orçamento" — é **REJECT** (revogação), **mesmo que mencione
+uma nova causa**.
+
+**MIXED só existe quando todas valem:**
+
+1. um aspecto foi **claramente aceito**;
+2. **outro aspecto diferente** (pela definição acima) continua pendente;
+3. ambos pertencem à preocupação da **mesma categoria** do episódio;
+4. estão na **mesma resposta** (§9.1 item 3).
+
+| Resposta do objetor | Rótulo | Por quê |
+|---|---|---|
+| "O preço total está ok, mas a entrada ainda não cabe." | **MIXED** | total aceito; entrada é outro aspecto, pendente |
+| "A mensalidade está ok; a taxa de implantação ainda está alta." (mesma resposta) | **MIXED** | aspectos independentes |
+| "O prazo de 24 meses está ok, mas a multa de cancelamento me preocupa." (categoria do episódio cobre os dois) | **MIXED** | aspectos independentes |
+| "Esse desconto resolve. Na verdade, incluindo imposto ainda fica caro." | **REJECT** | reafirma a preocupação geral ("ainda fica caro"); imposto é nova causa, não aspecto |
+| "O desconto ajuda, mas continua não cabendo no orçamento." | **REJECT** | reafirmação geral |
+| "Com desconto fica ok por mês, mas no ano ainda é caro." | **REJECT** | mesmo valor, outro ângulo; reafirma "caro" |
+
+**Residual vs. revocation:**
+
+- **Residual** = MIXED como definido acima.
+- **Revogação dentro da mesma resposta** = aceitação seguida de reafirmação geral → REJECT.
+- **Revogação posterior** = uma resposta posterior contradiz uma anterior → não é MIXED;
+  aplica-se a precedência temporal (§9.2).
+
+**"Ainda preciso verificar se consigo pagar."** — regra **provisória** v1: declaração de que
+a preocupação **ainda está pendente** é tratada como persistência → **REJECT** →
+`unresolved` quando sozinha; **MIXED** quando na mesma resposta após aceitar outro aspecto.
+Nunca UNKNOWN (o conteúdo é interpretável). **Pergunta explícita para D6 (§19):** a semântica
+comercial/de anotação quer isso como `unresolved`/REJECT, `partially_resolved`, `unknown` ou
+um estado futuro distinto ("pending")? Sem resposta final antes de Gabriel + Otávio; sem
+mudança de schema agora.
 
 ### 9.2 Precedência temporal entre respostas
 
@@ -372,7 +476,10 @@ A e B → MIXED → `partially_resolved`.
 |---|---|
 | "Esse desconto resolve completamente o problema de preço." / (closer: "Ótimo.") / "Uhum." | `resolved` |
 | "Uhum." / "Tá." | `unknown` |
-| "Esse desconto resolve." / "Na verdade, incluindo imposto ainda fica caro." (sem turno de outro no meio) | uma resposta, revogação do mesmo aspecto → REJECT → `unresolved` |
+| "Esse desconto resolve." / "Na verdade, incluindo imposto ainda fica caro." (sem turno de outro no meio) | uma resposta, reafirmação geral → REJECT → `unresolved` |
+| "A mensalidade está ok; a taxa de implantação ainda está alta." | uma resposta MIXED → `partially_resolved` |
+| "A mensalidade está ok." / (closer: "e sobre a implantação...") / "Mas a taxa de implantação está alta." | ACCEPT, depois REJECT (§4) → `unresolved` |
+| "Preço está alto." / closer parqueia / ... / closer retoma / "Com esse parcelamento dá." | `resolved` (§5.1) |
 | "Esse desconto resolve." / (closer argumenta sobre imposto) / "Ainda fica caro." | ACCEPT, depois REJECT → `unresolved` |
 | "Continua caro." / (closer argumenta) / "Com esse prazo resolve." | `resolved` |
 | "O preço total está ok." / "Mas a entrada ainda não cabe." | uma resposta MIXED → `partially_resolved` |
@@ -421,24 +528,71 @@ Notas:
 | Classe | Itens |
 |---|---|
 | **DIRECT EVIDENCE** | `call_id`; existência dos segmentos referenciados; `speaker_id`, `role`, `text` desses segmentos (vivem na Call) |
-| **DERIVED DETERMINISTICALLY** | `episode_id`; âncora; objetor; início/fim; partição estrutural por speaker (§7.3); `closer_segment_count`; same-category recurrence by same objector; "terminou no fim da call"; `deal_id` via `CallDealMatch` |
-| **HUMAN JUDGMENT** (golden set) | que há objeção; `category`; quais segmentos entram e em qual lista; âncora (§5.3); closure (§5.1); fronteira de resposta e rótulo de cada resposta (§9.1); `resolution_status`; função semântica de qualquer fala |
+| **DERIVED DETERMINISTICALLY** | `episode_id`; âncora; objetor; primeiro/último segmento e tempos (dados as listas); partição estrutural por speaker (§7.3); `closer_segment_count`; same-category recurrence by same objector (dado o conjunto de episódios); `deal_id` **somente** quando o match corrente da call é `matched` (convenção de `matching.py`, ver abaixo) |
+| **HUMAN JUDGMENT** (golden set) | que há objeção; `category`; quais segmentos entram e em qual lista; âncora (§5.3); closure, deferral/parked, on-topic funcional (§5.1); "fio ainda aberto/parked quando a call terminou"; fronteira de resposta, aspecto e rótulo de cada resposta (§9.1); `resolution_status`; função semântica de qualquer fala |
 | **MODEL INFERENCE** (extractor) | os mesmos itens de HUMAN JUDGMENT quando produzidos por extractor |
-| **NÃO REPRESENTADO em v1** | reopening; non-durable resolution; handling steps; estratégia |
+| **NÃO REPRESENTADO em v1** | reopening; non-durable resolution; estado parked; "terminou no fim da call"; handling steps; estratégia |
 
-**Proveniência (D4 APPROVED):** pertence ao **extraction/eval run** — tipo (human /
-rule-based / LLM), versão do extractor, modelo, prompt, versão do schema. Não é duplicada em
-cada episódio.
+**"Terminou no fim da call"** não é derivável: o ponto de closure não é armazenado, e o
+último segmento do episódio não é o ponto em que o fio fechou. É julgamento ("o fio estava
+OPEN/PARKED quando a call acabou?") e **não é armazenado em v1**.
+
+**Deal linkage:** `deal_id` canônico derivado só existe quando o **match corrente** da
+call é `matched`, pela consulta já definida em `src/closer_ai/domain/matching.py` ("latest row by created_at with status='matched'"); este documento não redefine essa regra. Linhas `ambiguous`
+(várias linhas candidatas), `unmatched` (sem `deal_id`), `rejected` ou `manual_review` **nunca
+produzem** `deal_id` canônico derivado; sem linha `matched`, os episódios dessa call não têm
+deal. Nenhuma mudança em `Deal`
+ou `CallDealMatch`.
+
+**Proveniência (D4 APPROVED):** pertence ao **extraction/eval run**, não ao episódio:
+
+- tipo do produtor (human / rule-based / LLM), versão do extractor, modelo, prompt;
+- versão do schema de `ObjectionEpisode`;
+- **identidade da Call de origem, por call** (P1-C):
+  - `normalizer_version` — versão do parser/normalizer que materializou a Call;
+  - `canonical_call_schema_version` — `Call.schema_version`;
+  - `segment_sequence_hash` — sha256 sobre `json.dumps` da lista ordenada de
+    `[segment_id, segment_index, speaker_id, role do speaker, sha256(text)]`.
+
+Por que essa escolha (e não só `source_call_manifest_id`): o manifest identifica o **dado
+bruto**, não o **resultado da normalização** — um parser novo sobre o mesmo manifest mudaria
+a segmentação sem mudar o manifest. `segment_id = hash(call_id, segment_index)`
+(`normalization/ids.py`) é posição, não conteúdo; só um hash do conteúdo segmentado detecta
+que o mesmo id passou a apontar para outra fala. `normalizer_version` é diagnóstico (por que
+mudou); o hash é a verificação (se mudou). `role` entra porque a validade da âncora depende
+dele (TD-14 pode mudar a resolução de roles). Timestamps ficam fora: o episódio não depende
+deles. O texto entra só como hash — nenhuma cópia de transcrição na proveniência. Tudo é
+calculável a partir da `Call` existente: **nenhuma mudança na Canonical Call**.
 
 ## 12. Grounding requirements e evaluation
+
+### 12.0 Evaluation preconditions (source Call)
+
+> Dois runs de anotação/extração **NÃO PODEM** ser comparados se foram produzidos contra
+> segmentações diferentes da Call de origem.
+
+- Para cada call, o evaluator compara o `segment_sequence_hash` (§11) dos dois runs, e ambos
+  contra a `Call` atualmente materializada.
+- Divergência → o evaluator **recusa** a comparação daquela call (erro explícito, nunca
+  métrica parcial silenciosa) e reporta quais calls foram recusadas.
+- Remédio: rematerializar a extração e/ou reanotar contra a segmentação atual. Episódios
+  nunca são "migrados" entre segmentações por índice.
+- Run sem a proveniência de origem → mesma recusa.
 
 ### 12.1 Grounding (cross-object, fora do modelo)
 
 1. `call_id` == `Call.call_id`; todo segment id resolve para segmento dessa Call.
 2. Âncora falada por participante `role == "lead"`.
 3. Todos os `objection_segment_ids` têm o mesmo `speaker_id` da âncora.
-4. Ambas as listas em ordem crescente de `segment_index`; todo segmento de contexto tem
-   índice > índice da âncora.
+4. **Ordem é semântica:** `objection_segment_ids[0]` é a âncora e deriva o `episode_id`;
+   ambas as listas devem estar na ordem de `segment_index` da Canonical Call; todo segmento
+   de contexto tem índice > índice da âncora. O modelo isolado não consegue checar isso
+   (ids são hashes), por isso é grounding obrigatório.
+
+**Episódio inválido:** falhar qualquer regra desta seção (ou §12.0) torna o episódio
+**INVALID**. Episódio inválido **não é persistido, não é avaliado e não é re-derivado**
+(nenhuma reordenação ou correção automática de âncora/id); é reportado como erro do run
+(conta na grounding rate, §12.5).
 5. Dentro de um run, `episode_id` é único (nenhum par de episódios com mesma call, âncora e
    categoria). Duplicata = saída inválida do run, reportada, não deduplicada em silêncio.
    Isso garante que, por partição, âncoras são únicas e o desempate de §12.2 é uma ordem
@@ -513,7 +667,9 @@ Na mesma partição:
 ### 12.6 Conjuntos vazios e agregação
 
 - Por call: P = N/A se TP+FP = 0; R = N/A se TP+FN = 0; F1 = N/A se P ou R for N/A.
-  (Call sem gold e sem predição: tudo N/A — é acerto, não erro, e não entra na média.)
+  - TP = FP = FN = 0 (sem gold e sem predição): P/R/F1 = N/A na call — é acerto, não erro.
+  - gold = 0 e predições > 0: **P = 0**, R = N/A, F1 = N/A na call. Os FPs **continuam
+    visíveis** no agregado micro (entram em FP).
 - **Agregado primário: micro** (somar TP/FP/FN de todas as calls, depois calcular). N/A só
   se o denominador agregado for 0.
 - Macro por call (secundário): média só sobre calls com valor definido; reportar quantas
@@ -553,9 +709,19 @@ duvidosa). Reintroduzir com semântica definida quando houver extractor probabil
 | Objection + resolution in same segment | §7.2 (s30). |
 | Response split across segments | §9.1 (A = B). |
 | Immediate reversal | §5.1: mesmo episódio, `unresolved`. |
-| Two concurrent threads | alternar entre eles não fecha nenhum; assunto fora de ambos fecha os dois (§5.1). |
+| Two concurrent threads | alternar entre eles não fecha nenhum; assunto closure-relevant fora de todos fecha os OPEN (§5.1). |
 | Same category, different participants | episódios separados (§5.4). |
-| Two distinct concerns, same category, same open thread | mesmo episódio (§4); separação deferred. |
+| Same category concern while thread open/parked | mesmo episódio, contexto, resposta REJECT (§4). |
+| Same category concern after closure | novo episódio; recorrência, não reabertura (§5.2). |
+| Discount accepted → overall price still high | REJECT (reafirmação geral, §9.1). |
+| Monthly fee accepted, setup fee pending (same response) | MIXED (§9.1). |
+| Explicitly parked objection | PARKED, mesmo episódio até retomada/abandono/fim (§5.1). |
+| ROI / volume question during price objection | on-topic funcional, contexto (§5.1). |
+| Call logistics ("vou compartilhar a tela") | não fecha (§5.1). |
+| Third-party aside | não fecha se não muda o fio comercial (§5.1). |
+| Parser/normalizer resegmentation between runs | comparação recusada; rematerializar/reanotar (§12.0). |
+| Ambiguous / unmatched CallDealMatch | sem `deal_id` canônico derivado (§11). |
+| Episode failing grounding/order | INVALID: não persistido, avaliado nem re-derivado (§12.1). |
 
 ## 15. Migration v0 → v1
 
@@ -590,7 +756,8 @@ link direto a `Deal`/`Outcome`; ligação cross-call de episódios.
 | Future taxonomy | `category` reusa enum v0; subtype aditivo; subtype é o caminho para separar preocupações da mesma categoria |
 | Annotation Guidelines | este documento define unidade, closure, âncora, listas e respostas; conteúdo das guidelines é de Otávio |
 | Future LLM extractor | saída = este contrato; precisa threading/closure, âncora, objetor e resolução; proveniência no run |
-| Deal / Outcome Intelligence | sem mudança de schema; via `call_id → CallDealMatch → deal_id`; não pode assumir reabertura a partir de recorrência |
+| Deal / Outcome Intelligence | sem mudança de schema; via `call_id → CallDealMatch → deal_id` só com status `matched`; não pode assumir reabertura a partir de recorrência |
+| Run provenance / eval harness | proveniência inclui identidade da Call de origem (§11); evaluator recusa comparar segmentações diferentes (§12.0); calculado a partir da `Call` existente |
 | IDs | novo `ep_`; demais inalterados |
 | Serialization | Pydantic JSON; `tuple` → array |
 | Tests | futuros: contrato, grounding helper, lifting, matcher com os 3 cenários de sanidade §12.3, N/A §12.6 |
@@ -603,17 +770,20 @@ link direto a `Deal`/`Outcome`; ligação cross-call de episódios.
 | D1 | Episode coexiste com Event v0 | **APPROVED** (Matheus) |
 | D2 | `episode_id` = hash(call_id, anchor_segment_id, category), com as limitações de §10 | **APPROVED** (Matheus) |
 | D3 | Piloto de dupla anotação | **OPEN** |
-| D4 | Proveniência no run | **APPROVED** (Matheus) |
+| D4 | Proveniência no run (inclui identidade da Call de origem, §11) | **APPROVED** (Matheus) |
 | D5 | Decisor do lado do lead equivale a lead? | **OPEN** |
-| D6 | Os quatro status são anotáveis e comercialmente úteis? | **OPEN** — Otávio + Gabriel |
+| D6 | Os quatro status são anotáveis e comercialmente úteis? Inclui: pendência declarada ("ainda preciso verificar se consigo pagar") deve ser `unresolved`/REJECT, `partially_resolved`, `unknown` ou um estado futuro? | **OPEN** — Otávio + Gabriel |
 | D7 | Implementar o contrato | **BLOCKED** até D3 + D6 |
 | D8 | ADR | Sim, como **primeiro passo de D7**: registrar D1/D2/D4 em `docs/decisions/` antes de qualquer código. |
 
 **D3 — piloto (sem thresholds).** O que medir: §12.3–12.6 humano A × humano B. Como: 3–5
 calls reais autorizadas, dois anotadores independentes, algoritmo §12.2. Inspeção: listar
-todo par não casado e toda discordância de resolução; classificar a causa (closure, âncora
-§5.3, lista objeção/contexto, objetor, categoria, fronteira de resposta §9.1, rótulo da
-resposta, transcript); ajustar regras onde a causa for ambiguidade da regra. **Thresholds de
+todo par não casado e toda discordância de resolução; classificar a causa em categorias
+nomeadas: `premature_closure` (fio fechado cedo: deferral não reconhecido, on-topic funcional
+tratado como mudança de assunto, logística ou aparte de terceiro tratado como closure),
+`late_closure`, `anchor` (§5.3), `list_membership` (objeção/contexto), `objector`,
+`category`, `response_boundary` (§9.1), `aspect` (MIXED vs REJECT), `response_label`,
+`transcript`; ajustar regras onde a causa for ambiguidade da regra. **Thresholds de
 go/no-go só depois dos resultados.**
 
 **D5 — decisor.** Identidade e papel de participante pertencem à Canonical Call / taxonomia
@@ -631,6 +801,9 @@ objeções de participantes `other` ficam sem episódio (lacuna documentada, nã
 - [x] ID (D2 aprovado) com limitações.
 - [x] 17 edge cases obrigatórios + adicionais.
 - [x] Migração sem quebrar v0; impacto por área.
-- [ ] Review Domain / Evaluator / Architecture (rev. 3): Domain APPROVE; Evaluator e Architecture pendentes (interrompidos por rate limit).
+- [x] Aspecto operacional; mesma categoria em fio aberto; parked threads; logística e apartes.
+- [x] Pinning da segmentação da Call de origem e precondição de eval.
+- [x] Ordem/invalidade; deal linkage só `matched`; métricas com gold vazio.
+- [x] Review Domain / Evaluator / Architecture (rev. 4): APPROVE (Evaluator após fix de closure retrospectiva, §5.1).
 - [ ] D3, D5, D6 resolvidos.
 - [ ] (Próxima task) ADR + implementação, só após D3 + D6.
