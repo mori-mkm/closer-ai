@@ -123,6 +123,9 @@ Call → resolve_current_match → qualquer outro state → SEM linkage de Outco
 
 Outcome e ObjectionEpisode **não** foram alterados; o DEP-1 citado neles passa a ter resolver.
 
+Candidatos: `ExactExternalIdMatcher(provider)` resolve o registro do CRM da Call via Deal Identity
+(só `linked` gera candidato); o candidato só vira canônico por `MatchDecision`.
+
 Composição executável: `closer_ai.domain.commercial_state.resolve_call_commercial_state`
 (Call → match atual → Deal → outcome atual; sem fallback para `Deal.outcome`).
 

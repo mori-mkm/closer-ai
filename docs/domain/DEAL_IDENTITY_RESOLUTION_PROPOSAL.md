@@ -128,10 +128,10 @@ e "card aberto vence" são proibidos.
   cards paralelos com status conflitantes viram **evidências conflitantes** tratadas pela policy do
   Outcome (nunca "o status do card vence"). Só evidência de card `linked` ao Deal pode ser
   atribuída a ele.
-- **Call matching:** DEP-1 continua Call → Deal. Hoje o matcher só casa com o card fundador
-  (`deal.external_id`). Com identidade, o **gerador de candidatos** (matcher) resolve
-  `call.source_id` → source record → Deal via `resolve_deal_for_source_record`; o resolver de
-  match atual **não muda**.
+- **Call matching (implementado):** `ExactExternalIdMatcher(provider)` resolve
+  `(call.company_id, provider, call.source_id)` → source record → `resolve_deal_for_source_record`;
+  só `linked` gera candidato (e o Deal precisa estar entre os candidatos). Sem fallback para
+  `Deal.external_id`. O matcher não decide identidade nem o match atual (DEP-1 inalterado).
 
 ## 7. Fundação de Deals — **DI-M1 = 7a (decidido)**
 
@@ -225,6 +225,6 @@ vence"; "card aberto vence"; dedup automático/fuzzy/LLM; `SourceRecord` + MDM c
    `append_deal_identity_decision` (CAS, autoridade manual), reusando `_chain.linear_chain`.
    Aditivo; `Deal`, matching e Outcome intocados. Testes: `tests/unit/domain/test_deal_identity.py`.
 2. **Feito:** política de fundação — `found_deal` (§7.1).
-3. **Depois (separado):** matcher consulta identidade para gerar candidatos; atribuição de
-   `OutcomeEvidence` exige card `linked` (write path).
-4. Fora: fusão de Deals, sinais automáticos, adapter Kommo.
+3. **Feito:** matcher consulta identidade para gerar candidatos (§6).
+4. **Depois:** atribuição de `OutcomeEvidence` exige card `linked` (write path).
+5. Fora: fusão de Deals, sinais automáticos, adapter Kommo.
