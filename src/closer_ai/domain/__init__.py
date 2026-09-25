@@ -26,6 +26,7 @@ from closer_ai.domain.deal_identity import (
     append_deal_identity_decision,
     derive_deal_identity_decision_id,
     derive_source_record_key,
+    found_deal,
     resolve_deal_for_source_record,
 )
 from closer_ai.domain.lead import LEAD_SCHEMA_VERSION, Lead, derive_lead_id
@@ -131,6 +132,7 @@ __all__ = [
     "derive_outcome_evidence_id",
     "derive_source_record_key",
     "derive_stage_event_id",
+    "found_deal",
     "resolve_call_commercial_state",
     "resolve_current_match",
     "resolve_current_outcome",
