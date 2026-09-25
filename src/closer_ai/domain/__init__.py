@@ -6,6 +6,10 @@ docs/architecture/DATA_MODEL.md for Deal/CallDealMatch.
 """
 from __future__ import annotations
 
+from closer_ai.domain.commercial_state import (
+    CallCommercialState,
+    resolve_call_commercial_state,
+)
 from closer_ai.domain.deal import (
     DEAL_SCHEMA_VERSION,
     Deal,
@@ -69,6 +73,7 @@ __all__ = [
     "MATCHING_SCHEMA_VERSION",
     "OBJECTION_SCHEMA_VERSION",
     "OUTCOME_SCHEMA_VERSION",
+    "CallCommercialState",
     "CallDealMatch",
     "CallDealMatcher",
     "ConfidenceLevel",
@@ -111,6 +116,7 @@ __all__ = [
     "derive_outcome_assessment_id",
     "derive_outcome_evidence_id",
     "derive_stage_event_id",
+    "resolve_call_commercial_state",
     "resolve_current_match",
     "resolve_current_outcome",
     "resolve_eligible_evidence",
