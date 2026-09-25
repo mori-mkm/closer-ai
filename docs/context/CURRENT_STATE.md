@@ -43,7 +43,7 @@ Call outcome != Deal outcome. Esta distinção já está implementada como invar
 | Lead contract | IMPLEMENTED | `src/closer_ai/domain/lead.py`; 12 testes |
 | Deal + StageEvent contract | IMPLEMENTED | `src/closer_ai/domain/deal.py`; 32 testes |
 | CallDealMatch + MatchEvidence contract | IMPLEMENTED | `src/closer_ai/domain/matching.py`; 33 testes |
-| `CallDealMatcher` protocol + `ExactExternalIdMatcher` | IMPLEMENTED (baseline único, 1 sinal) | mesmo arquivo; 8 testes em `test_matcher.py`; só compara `call.source_id == deal.external_id` |
+| `CallDealMatcher` protocol + `ExactExternalIdMatcher` | IMPLEMENTED (baseline único, 1 sinal) | mesmo arquivo; `test_matcher.py`; resolve `call.source_id` como registro do CRM via Deal Identity (`resolve_deal_for_source_record`); só `linked` gera candidato; sem fallback para `deal.external_id` |
 | Agent harness (Domain Agent / AI Engineer / Evaluator / Reviewer) | IMPLEMENTED | `.claude/agents/*.md`, `docs/agents/*.md` |
 | CI (GitHub Actions) | IMPLEMENTED | `.github/workflows/ci.yml`, `docs/agents/WORKFLOW.md` (seção merge gate) |
 | Data boundary (`.gitignore`, `data/README.md`) | IMPLEMENTED | ver Fase 12 — nenhum dado real versionado, docs de negócio ignorados |

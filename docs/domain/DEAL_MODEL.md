@@ -275,7 +275,9 @@ Nenhuma integração real com Kommo/CRM — todos os campos (`source`, `external
 `pipeline_id`, `external_stage_id`) são genéricos, não assumem payload específico de nenhum
 provedor. Nenhuma persistência (`storage/`). Nenhum algoritmo de matching sofisticado (fuzzy,
 embeddings, LLM) — `ExactExternalIdMatcher` é o único baseline, com um único sinal
-determinístico (`call.source_id == deal.external_id`). Outcome Intelligence não implementada.
+determinístico: `call.source_id` como referência a um registro do CRM (`provider` configurado),
+resolvida via Deal Identity (`DEAL_IDENTITY_RESOLUTION_PROPOSAL.md`) — nunca comparando com
+`deal.external_id`. Outcome Intelligence não implementada.
 
 ## Relação com outros documentos
 

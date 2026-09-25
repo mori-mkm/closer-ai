@@ -72,6 +72,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from closer_ai.domain._chain import authority_chain_head, cas_append
 from closer_ai.domain.deal import Deal
+from closer_ai.domain.deal_identity import (
+    DealIdentityDecision,
+    derive_source_record_key,
+    resolve_deal_for_source_record,
+)
 from closer_ai.normalization.models import Call
 
 MATCHING_SCHEMA_VERSION = "1.0.0"
@@ -199,8 +204,11 @@ class CallDealMatch(BaseModel):
 class CallDealMatcher(Protocol):
     """Provider-agnostic seam for Call<->Deal matching, same pattern as
     `closer_ai.ai.objection_extraction.ObjectionExtractor`: callers depend on this interface,
-    never on a concrete implementation. A future name/email/phone-heuristic or CRM-backed
-    matcher implements this same signature.
+    never on a concrete implementation.
+
+    A matcher proposes candidates for a Call among canonical Deals; it never decides which Deal
+    a CRM record belongs to (that is `deal_identity`, DEP-2) and never decides the current
+    authoritative match (that is MatchDecision + resolve_current_match, DEP-1).
 
     Returns a list, not a single result: an AMBIGUOUS outcome is multiple CallDealMatch rows
     (one per tied candidate, see matching.py's module docstring) — a single-result return type
@@ -209,71 +217,84 @@ class CallDealMatcher(Protocol):
     confused.
     """
 
-    def match(self, call: Call, candidates: list[Deal]) -> list[CallDealMatch]:
+    def match(
+        self,
+        call: Call,
+        candidates: list[Deal],
+        identity_decisions: list[DealIdentityDecision],
+    ) -> list[CallDealMatch]:
         ...
 
 
 class ExactExternalIdMatcher:
     """Deterministic reference implementation of `CallDealMatcher`.
 
-    The only signal used is `call.source_id == deal.external_id` (both already required,
-    non-PII fields on Call/Deal today) — e.g. a CRM/Zoom integration that stamps the same
-    identifier on both the meeting and the deal record. No email/phone comparison: `Call`'s
-    `Participant` (normalization/models.py) does not carry email or phone at all, so any
-    email/phone-based matching would need to invent a field this codebase doesn't have yet
-    (exactly the "não depender de payload hipotético do Kommo" restriction this task set) or
-    reach into `AgroParseResult.metadata`, which is not part of the canonical `Call` this
-    matcher receives. Extending to `exact_email`/`exact_phone`/heuristic methods is future
-    work once a real source of that data on `Call` (or a richer input beyond `Call` alone) is
-    decided — deliberately not guessed at here.
+    `call.source_id` is a reference to a CRM source record in `provider` (e.g. an integration
+    that stamps the CRM record id on the meeting). The canonical Deal comes only from Deal
+    Identity: source record key (call.company_id, provider, call.source_id) ->
+    resolve_deal_for_source_record -> state "linked". There is no fallback to
+    `Deal.external_id`: a record with no identity decision yields no candidate, even if some
+    Deal's external_id equals call.source_id (legacy records need an explicit foundation or
+    identity decision first). Every non-"linked" identity state (no_decision, unresolved,
+    ambiguous, not_a_deal, conflict) yields "unmatched", with the reason in the evidence.
+
+    A Call carries exactly one record reference (`source_id`), so this matcher yields at most
+    one candidate. The linked Deal must also be among `candidates` (the Deals the caller is
+    matching against). A corrupt identity history (same decision id, different payload) raises
+    ValueError from `match()` — it fails loud instead of degrading to a guess.
     """
 
-    def match(self, call: Call, candidates: list[Deal]) -> list[CallDealMatch]:
+    def __init__(self, provider: str) -> None:
+        if not provider.strip():
+            raise ValueError("provider must not be empty")
+        self.provider = provider
+
+    def match(
+        self,
+        call: Call,
+        candidates: list[Deal],
+        identity_decisions: list[DealIdentityDecision],
+    ) -> list[CallDealMatch]:
         created_at = datetime.now(UTC)
-        # dedupe by deal_id first: a caller passing the same deal twice (e.g. a duplicated
-        # join upstream) is not two distinct candidates and must never look like ambiguity —
-        # that would be exactly the "false ambiguity from a caller bug" failure mode, the
-        # mirror image of the "silently pick a winner" one this whole contract exists to
-        # prevent.
-        seen_deal_ids: set[str] = set()
-        matches: list[Deal] = []
-        for deal in candidates:
-            if deal.external_id == call.source_id and deal.deal_id not in seen_deal_ids:
-                seen_deal_ids.add(deal.deal_id)
-                matches.append(deal)
-
-        if not matches:
-            return [
-                CallDealMatch(
-                    call_deal_match_id=derive_call_deal_match_id(
-                        call.call_id, None, "exact_external_id", created_at
-                    ),
-                    call_id=call.call_id,
-                    deal_id=None,
-                    matching_method="exact_external_id",
-                    status="unmatched",
-                    confidence_level="high",
-                    evidence=[],
-                    created_at=created_at,
-                )
-            ]
-
-        status: MatchStatus = "matched" if len(matches) == 1 else "ambiguous"
+        deal_id, detail = self._canonical_deal(call, candidates, identity_decisions)
+        status: MatchStatus = "matched" if deal_id is not None else "unmatched"
         return [
             CallDealMatch(
                 call_deal_match_id=derive_call_deal_match_id(
-                    call.call_id, deal.deal_id, "exact_external_id", created_at
+                    call.call_id, deal_id, "exact_external_id", created_at
                 ),
                 call_id=call.call_id,
-                deal_id=deal.deal_id,
+                deal_id=deal_id,
                 matching_method="exact_external_id",
                 status=status,
                 confidence_level="high",
-                evidence=[MatchEvidence(signal="external_id_exact", matched=True)],
+                evidence=[
+                    MatchEvidence(
+                        signal="external_id_exact", matched=deal_id is not None, detail=detail
+                    )
+                ],
                 created_at=created_at,
             )
-            for deal in matches
         ]
+
+    def _canonical_deal(
+        self,
+        call: Call,
+        candidates: list[Deal],
+        identity_decisions: list[DealIdentityDecision],
+    ) -> tuple[str | None, str]:
+        """(canonical deal_id or None, non-PII audit detail: record key + identity decision)."""
+        if not call.source_id.strip():
+            return None, "call has no source record reference"
+        key = derive_source_record_key(call.company_id, self.provider, call.source_id)
+        identity = resolve_deal_for_source_record(
+            key, [d for d in identity_decisions if d.source_record_key == key]
+        )
+        if identity.state != "linked" or identity.deal_id is None:
+            return None, f"source_record={key}; identity={identity.state}"
+        if identity.deal_id not in {deal.deal_id for deal in candidates}:
+            return None, f"source_record={key}; identity=linked; deal not among candidates"
+        return identity.deal_id, f"source_record={key}; identity_decision={identity.decision_id}"
 
 
 # --- Current authoritative match (DEP-1) -------------------------------------------------------
