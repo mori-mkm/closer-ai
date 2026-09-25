@@ -6,7 +6,8 @@ Design decisions worth knowing:
   one — a Deal can have zero, one, or many Calls, and the sale exists exactly once, on the
   Deal, never duplicated per call.
 - No `call_ids` field. Deal <-> Call membership lives entirely in `CallDealMatch`
-  (matching.py), queried as "rows for this deal_id with status='matched'", never a list on
+  (matching.py): a call belongs to this deal when `resolve_current_match(call_id, ...)` returns
+  state 'matched' with this deal_id — never "rows with status='matched'" — and never a list on
   Deal. A list here would be a second source of truth that can silently drift from
   CallDealMatch (a match gets rejected on review, the list isn't updated) — and on a frozen
   model, appending to it would mean re-minting the whole Deal snapshot every time a new call is

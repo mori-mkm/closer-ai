@@ -78,8 +78,10 @@ Nenhum campo de identificação é obrigatório — ver "Edge cases".
 | `value`, `currency` | `float \| None`, `str \| None` | `currency` obrigatório se `value` setado; risco de precisão monetária conhecido (float, não Decimal) e aceito para v0 |
 | `metadata` | `dict` | passthrough |
 
-**Sem `call_ids`.** A associação Deal↔Call vive inteiramente em `CallDealMatch`
-(`status='matched'`), nunca um campo/lista em `Deal`. Um campo assim seria uma segunda fonte de
+**Sem `call_ids`.** A associação Deal↔Call vive inteiramente no matching: uma call pertence a
+um deal quando o **resultado autoritativo atual** (`resolve_current_match`, ver
+`docs/domain/CURRENT_MATCH_RESOLVER.md`) é `matched` com esse `deal_id` — nunca "linhas
+`CallDealMatch` com `status='matched'`" —, nunca um campo/lista em `Deal`. Um campo assim seria uma segunda fonte de
 verdade (um match pode ser rejeitado depois em revisão, sem atualizar a lista) e, num model
 `frozen`, forçaria reemitir o snapshot inteiro a cada call nova — puro churn.
 
@@ -211,17 +213,16 @@ conceito de multi-tenancy em todo o codebase.
 ## Cardinalidades
 
 - Deal ↔ Lead: N:1 (`Deal.lead_id` opcional).
-- Deal ↔ Call: logicamente 1:N, só via `CallDealMatch(status='matched')` — nunca um campo em
-  nenhum dos dois lados (sem nesting, sem lista).
+- Deal ↔ Call: logicamente 1:N, só via o resultado atual do `MatchDecision` de cada call
+  (`docs/domain/CURRENT_MATCH_RESOLVER.md`) — nunca um campo em nenhum dos dois lados.
 - Deal ↔ StageEvent: 1:N, append-only.
 - Call ↔ CallDealMatch: 1:N (histórico de tentativas/candidatos/métodos ao longo do tempo).
 - Deal ↔ CallDealMatch: 1:N (um deal pode ser candidato em várias calls, aceito ou não).
 
-**Não impedido estruturalmente, de propósito**: nada no schema impede duas linhas
-`status='matched'` para o mesmo `call_id` contra deals diferentes. Isso fica para uma
-constraint de unicidade em nível de storage/aplicação (`(call_id, status='matched')`) quando
-essa camada existir — rastreado aqui como requisito futuro explícito, não perdido em comentário
-solto.
+Linhas `CallDealMatch` são candidatos/tentativas: várias linhas `status='matched'` para a
+mesma call (reruns, correções) são histórico legítimo e **não** definem o deal da call. O deal
+canônico vem só da cadeia linear de `MatchDecision` (no máximo um head por call, garantido por
+CAS — ver `docs/domain/CURRENT_MATCH_RESOLVER.md`).
 
 ## Invariantes verificáveis no próprio model
 
@@ -242,7 +243,8 @@ solto.
   daquele `deal_id` — um `Deal` isolado não enxerga seu próprio histórico (por design, sem
   nesting). Fica para o write path futuro (`storage/`/`integrations/`) garantir isso
   atomicamente.
-- No máximo uma linha `status='matched'` por `call_id` — ver "Cardinalidades" acima.
+- Persistência do CAS de `MatchDecision` (`append_match_decision` é a regra; a garantia
+  atômica é do storage futuro) — ver `docs/domain/CURRENT_MATCH_RESOLVER.md`.
 - `confidence_score` vs `confidence_level` para métodos heurísticos não têm cross-check: nada
   impede `score=0.1` com `level='high'` hoje. A correção da calibração é responsabilidade
   exclusiva do algoritmo de matching (write path), não deste schema.

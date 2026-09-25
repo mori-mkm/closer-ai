@@ -3,9 +3,11 @@
 A CallDealMatch means "the evidence available suggests this call belongs to this deal", never
 "the algorithm is certain". One row = one (call, candidate deal, method, attempt) tuple, not a
 single mutable "current belief" per call — multiple rows can and do exist for the same call
-(ties, different methods, re-runs over time). "What's the accepted match for this call right
-now" is a query (latest row by created_at with status='matched'), the same pattern as
-`Deal.current_stage` vs. `StageEvent` history in deal.py.
+(ties, different methods, re-runs over time). CallDealMatch rows are candidates/attempts, never
+the authoritative answer: "what's the accepted match for this call right now" is answered only
+by `resolve_current_match` over the call's `MatchDecision` chain (bottom of this module, see
+docs/domain/CURRENT_MATCH_RESOLVER.md). Never "latest row by created_at with status='matched'"
+— that resurrects a match a later decision rejected, made ambiguous or replaced.
 
 Design decisions worth knowing:
 
@@ -271,3 +273,257 @@ class ExactExternalIdMatcher:
             )
             for deal in matches
         ]
+
+
+# --- Current authoritative match (DEP-1) -------------------------------------------------------
+#
+# CallDealMatch rows above are candidates/attempts. The authoritative answer for a call is a
+# linear, append-only chain of MatchDecision records: each decision names the head it replaces
+# (`supersedes_decision_id`, compare-and-swap), the current result is the chain head, and
+# `created_at` never orders anything. Full rationale: docs/domain/CURRENT_MATCH_RESOLVER.md.
+
+MatchDecidedBy = Literal["automatic", "manual"]
+
+CurrentMatchState = Literal[
+    "matched", "ambiguous", "rejected", "unmatched", "manual_review", "no_decision", "conflict"
+]
+
+
+class MatchDecisionConflict(Exception):
+    """Append refused: stale expected head, forked history, or manual authority."""
+
+
+def derive_match_decision_id(
+    call_id: str,
+    status: str,
+    deal_id: str | None,
+    match_ids: tuple[str, ...],
+    decided_by: str,
+    supersedes_decision_id: str | None,
+    created_at: datetime,
+) -> str:
+    """Deterministic id over every content field, so same id + different payload can only mean
+    a bug, never a legitimate redelivery. `created_at` is hashed for uniqueness only; it never
+    decides which decision is current."""
+    canonical = json.dumps(
+        [
+            "match_decision",
+            call_id,
+            status,
+            deal_id,
+            sorted(match_ids),
+            decided_by,
+            supersedes_decision_id,
+            _canonical_timestamp(created_at),
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    return f"mdc_{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:_ID_LENGTH]}"
+
+
+class MatchDecision(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = MATCHING_SCHEMA_VERSION
+    match_decision_id: str
+    call_id: str
+    status: MatchStatus
+    deal_id: str | None = None
+    match_ids: tuple[str, ...] = ()
+    decided_by: MatchDecidedBy
+    supersedes_decision_id: str | None = None
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> MatchDecision:
+        if not self.call_id.strip():
+            raise ValueError("call_id must not be empty")
+        if self.created_at.tzinfo is None:
+            raise ValueError("created_at must be timezone-aware")
+        if self.status == "matched":
+            if self.deal_id is None or not self.deal_id.strip():
+                raise ValueError("a matched decision must name exactly one deal_id")
+        elif self.deal_id is not None:
+            raise ValueError(f"deal_id must be None when status is {self.status!r}")
+        if len(set(self.match_ids)) != len(self.match_ids) or any(
+            not m.strip() for m in self.match_ids
+        ):
+            raise ValueError("match_ids must be unique, non-empty ids")
+        if self.decided_by == "automatic" and not self.match_ids:
+            raise ValueError("an automatic decision must cite the CallDealMatch rows it came from")
+
+        expected_id = derive_match_decision_id(
+            self.call_id,
+            self.status,
+            self.deal_id,
+            self.match_ids,
+            self.decided_by,
+            self.supersedes_decision_id,
+            self.created_at,
+        )
+        if self.match_decision_id != expected_id:
+            raise ValueError(
+                f"match_decision_id must be derive_match_decision_id(...); expected "
+                f"{expected_id!r}, got {self.match_decision_id!r}"
+            )
+        if self.supersedes_decision_id == self.match_decision_id:
+            raise ValueError("a decision cannot supersede itself")
+        return self
+
+
+class CurrentMatchResult(BaseModel):
+    """`deal_id` is set only for state 'matched' — the only state with a canonical deal."""
+
+    model_config = ConfigDict(frozen=True)
+
+    call_id: str
+    state: CurrentMatchState
+    deal_id: str | None = None
+    decision_id: str | None = None
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> CurrentMatchResult:
+        if (self.state == "matched") != (self.deal_id is not None):
+            raise ValueError("deal_id is set if and only if state is 'matched'")
+        if (self.state in ("no_decision", "conflict")) != (self.decision_id is None):
+            raise ValueError("decision_id is None if and only if there is no current head")
+        return self
+
+
+def _chain_head(
+    call_id: str, decisions: list[MatchDecision]
+) -> tuple[MatchDecision | None, bool]:
+    """(head, ok). ok=False means the history is not one linear chain (fork, dangling
+    supersession, several roots, cycle) — never repaired by picking a winner."""
+    by_id: dict[str, MatchDecision] = {}
+    for decision in decisions:
+        if decision.call_id != call_id:
+            raise ValueError(
+                f"decision {decision.match_decision_id} belongs to call {decision.call_id!r}, "
+                f"not {call_id!r}"
+            )
+        seen = by_id.get(decision.match_decision_id)
+        if seen is not None and seen != decision:
+            raise ValueError(
+                f"same match_decision_id with different payload: {decision.match_decision_id}"
+            )
+        by_id[decision.match_decision_id] = decision
+    if not by_id:
+        return None, True
+
+    roots = [d for d in by_id.values() if d.supersedes_decision_id is None]
+    child_of: dict[str, MatchDecision] = {}
+    for decision in by_id.values():
+        parent = decision.supersedes_decision_id
+        if parent is None:
+            continue
+        if parent not in by_id or parent in child_of:
+            return None, False
+        child_of[parent] = decision
+    if len(roots) != 1:
+        return None, False
+
+    head, length = roots[0], 1
+    while head.match_decision_id in child_of:
+        child = child_of[head.match_decision_id]
+        if head.decided_by == "manual" and child.decided_by == "automatic":
+            # only reachable if something other than append_match_decision wrote the history
+            return None, False
+        head, length = child, length + 1
+    if length != len(by_id):
+        return None, False
+    return head, True
+
+
+def resolve_current_match(call_id: str, decisions: list[MatchDecision]) -> CurrentMatchResult:
+    """The authoritative current match result for `call_id`. Currentness is resolved first
+    (chain head), status is interpreted second. CallDealMatch rows are never consulted: rows
+    without any decision (legacy history, or matcher output nobody decided on) resolve to
+    'no_decision', never to whatever the latest matched row says."""
+    head, ok = _chain_head(call_id, decisions)
+    if not ok:
+        return CurrentMatchResult(call_id=call_id, state="conflict")
+    if head is None:
+        return CurrentMatchResult(call_id=call_id, state="no_decision")
+    return CurrentMatchResult(
+        call_id=call_id,
+        state=head.status,
+        deal_id=head.deal_id,
+        decision_id=head.match_decision_id,
+    )
+
+
+def append_match_decision(
+    history: list[MatchDecision], decision: MatchDecision
+) -> list[MatchDecision]:
+    """Compare-and-swap append. Returns the new history (unchanged for an idempotent
+    redelivery or a no-op re-decision); raises MatchDecisionConflict for a stale expected
+    head, a forked history, or an automatic decision over a manual one; ValueError for
+    same id + different payload or a decision from another call."""
+    head, ok = _chain_head(decision.call_id, history)
+    if not ok:
+        raise MatchDecisionConflict("history is not a linear chain; manual repair required")
+
+    existing = next(
+        (d for d in history if d.match_decision_id == decision.match_decision_id), None
+    )
+    if existing is not None:
+        if existing != decision:
+            raise ValueError(
+                f"same match_decision_id with different payload: {decision.match_decision_id}"
+            )
+        return list(history)
+
+    actual_head = head.match_decision_id if head is not None else None
+    if decision.supersedes_decision_id != actual_head:
+        raise MatchDecisionConflict(
+            f"stale write: expected head {decision.supersedes_decision_id!r}, "
+            f"actual head {actual_head!r}; reload and recompute"
+        )
+
+    if head is not None:
+        same_result = (head.status, head.deal_id) == (decision.status, decision.deal_id)
+        upgrades_authority = head.decided_by == "automatic" and decision.decided_by == "manual"
+        if same_result and not upgrades_authority:
+            return list(history)
+        if head.decided_by == "manual" and decision.decided_by == "automatic":
+            raise MatchDecisionConflict(
+                "current decision is manual; only another manual decision can replace it"
+            )
+    return [*history, decision]
+
+
+def decision_from_matcher_output(
+    rows: list[CallDealMatch], *, supersedes_decision_id: str | None, created_at: datetime
+) -> MatchDecision:
+    """Automatic decision for one matcher batch (e.g. one ExactExternalIdMatcher.match call).
+    A candidate becomes canonical only through a decision, and only as a single matched row;
+    an ambiguous batch stays ambiguous."""
+    if not rows:
+        raise ValueError("a matcher batch has at least one row")
+    if len({row.call_id for row in rows}) != 1 or len({row.status for row in rows}) != 1:
+        raise ValueError("a matcher batch must share one call_id and one status")
+    if len({row.call_deal_match_id for row in rows}) != len(rows):
+        raise ValueError("a matcher batch must not repeat the same CallDealMatch row")
+    status = rows[0].status
+    if status == "matched" and len(rows) != 1:
+        raise ValueError("several matched rows in one batch is ambiguity, not a match")
+    if status == "ambiguous" and len(rows) < 2:
+        raise ValueError("an ambiguous batch needs at least two candidate rows")
+
+    call_id = rows[0].call_id
+    deal_id = rows[0].deal_id if status == "matched" else None
+    match_ids = tuple(sorted(row.call_deal_match_id for row in rows))
+    return MatchDecision(
+        match_decision_id=derive_match_decision_id(
+            call_id, status, deal_id, match_ids, "automatic", supersedes_decision_id, created_at
+        ),
+        call_id=call_id,
+        status=status,
+        deal_id=deal_id,
+        match_ids=match_ids,
+        decided_by="automatic",
+        supersedes_decision_id=supersedes_decision_id,
+        created_at=created_at,
+    )
