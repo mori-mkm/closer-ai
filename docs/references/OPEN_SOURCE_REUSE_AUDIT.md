@@ -63,7 +63,7 @@ Os contratos do AI Closer vencem qualquer ideia externa:
 (rep/prospect/customer/partner/internal/unknown), `text`, `start_seconds`/`end_seconds` opcionais
 (`src/gtmsi/models.py:18-78`, `schemas/transcript.schema.json`). **Turns não têm id nem índice**;
 o prompt recebe `[mm:ss] Speaker (side): text` (`models.py:46-59`). `side` é inferido por regex
-(`adapters/base.py:61-69`, aplicado em `:83`) — **viola "unknown nunca inferido"**.
+(`adapters/base.py:61-69`, aplicado em `build_participants`, `:88`) — **viola "unknown nunca inferido"**.
 Nosso modelo (segment_id + segment_index + speaker_id referencial) é mais forte.
 
 - **IDEA_ONLY:** renderizar o transcript para o LLM com prefixo de id curto por segmento
@@ -289,13 +289,13 @@ para nós (Attention é app CLI; Zime é conteúdo + scripts).
 
 | # | Problema | Conceito externo | No AI Closer | Autoridade que permanece nossa | Não transportar |
 |---|---|---|---|---|---|
-| A1 | Golden Set que não mede alucinação nem N/A | gold com seções "não presente" e "não se aplica"; tiers; falsifying expectation (Zime `EVALS.md:91-131`, `evals/gold/BRIEFS.md`) | cada call anotada ganha rótulos negativos (objeções plausíveis ausentes), N/A por dimensão, `tier`, e ≥ 1 expectativa que saída rasa falharia | `ObjectionEpisode`, matching §12 de AC-47, dupla anotação | gold escrito pelo mesmo autor do prompt; skills em Markdown |
+| A1 | Golden Set que não mede alucinação nem N/A | gold com seções "não presente" e "não se aplica"; tiers; falsifying expectation (Zime `EVALS.md:91-131`, `evals/gold/BRIEFS.md`) | cada call anotada ganha rótulos negativos (objeções plausíveis ausentes), N/A por dimensão, `tier`, e ≥ 1 expectativa que saída rasa falharia. **Regra de processo:** quem escreve prompt/guideline não escreve o gold, e casos sintéticos nunca são maioria | `ObjectionEpisode`, matching §12 de AC-47, dupla anotação | gold escrito pelo mesmo autor do prompt; skills em Markdown |
 | A2 | Métricas infladas por formato | "duas métricas nunca misturadas" (Zime `EVALS.md:27-38`) | reportar separadamente schema validity, grounding rate e P/R substantivo (já é nosso §12; tornar regra do harness) | runs INVALID de §12.1.1 | score único combinado |
 | A3 | Guidelines difíceis de aplicar | entrada "definição / cues + / cues − / often_confused_with / exemplo fraco×forte" (Attention `scorecards/discovery.yaml:23-60`, `config/call_types.yaml`; Zime `negotiation-closing/references/rubric.md:6-17`) | um arquivo versionado por código de taxonomia e por valor de `resolution_status` | taxonomia validada por Gabriel/Otávio | pesos, bandas, coaching prompts |
-| A4 | Taxonomia/guideline mudando sem rastro | arquivos versionados + schema + CI (Attention); ledger append-only de amendments (Zime `evals/framework/README.md:114-137`) | `version` no arquivo + versão registrada no run (D4) + ledger ligado a eval runs | proveniência no run | Claude-skill packaging |
+| A4 | Taxonomia/guideline mudando sem rastro | arquivos versionados + schema + CI (Attention); ledger append-only de amendments (Zime `evals/framework/README.md:114-137`) | `version` no arquivo + versão registrada no run (D4) + ledger ligado a eval runs. Ledger = um arquivo Markdown/JSONL (ou só o histórico do git), **nunca um serviço**; validação = um script pequeno com o Pydantic que já usamos, não maquinaria de schema | proveniência no run | Claude-skill packaging |
 | A5 | Evidência inferida contaminando canônico | dito × inferido; "Unclear em vez de chutar" (Zime) | guidelines e extractor distinguem dito/inferido; só dito com `segment_id` validado vira evidência; inferido → revisão | grounding por `segment_id` | inferidos no output final |
 | A6 | Extractor robusto a falhas do provider | Protocol mínimo + fake; retry tipado em `max_tokens`; cached system blocks (Attention `pipeline.py:25-26`, `llm.py:67-111`) | manter `ObjectionExtractor` Protocol; o LLM extractor detecta truncamento de saída, falha tipado, persiste resposta bruta | proveniência no run; nunca truncar entrada em silêncio | parse por heurística de chaves; truncamento de entrada |
-| A7 | LLM-as-judge não confiável | amostras isoladas, voto por campo, calibração com humano (Zime `judge.py`, `calibrate.py`) | se usarmos judge: modelo fixado, alucinação calculada do lado da saída comparando `segment_id` com gold, gate de kappa judge×humano (N/A quando indefinido) | Golden Set humano como verdade | código deles (falhas listadas) |
+| A7 | LLM-as-judge não confiável | amostras isoladas, voto por campo, calibração com humano (Zime `judge.py`, `calibrate.py`) | se usarmos judge: modelo fixado, alucinação calculada do lado da saída comparando `segment_id` com gold, `derivable` por maioria (não `any()`), gate de kappa judge×humano (N/A quando indefinido) | Golden Set humano como verdade | código deles (falhas listadas) |
 | A8 | Evals de classificação | casos YAML + rótulo esperado + matriz de confusão (Attention `evals/run_evals.py`) | casos para categoria de objeção e `resolution_status` | harness do AI Closer | API real obrigatória em teste |
 | A9 | Instruções de prompt | ler tudo antes; "Do not" list; confiança ancorada em evidência (Zime) | seções do prompt do extractor | contratos Pydantic | "decida e siga" |
 
@@ -346,8 +346,9 @@ Não é parecer jurídico.
 5. **Judge (opcional)** (A7): só se a revisão humana não escalar; calibrado contra humano.
 
 Nada disso exige dependência nova; promptfoo/Instructor/Langfuse/Label Studio ficam para decisão
-própria quando a necessidade aparecer (nenhum dos dois repos integra Instructor, Langfuse ou Label
-Studio; Zime usa promptfoo como runner fino).
+própria quando a necessidade aparecer. Verificado por grep nos dois snapshots: nenhum integra
+Instructor, Langfuse ou Label Studio (a única ocorrência é texto de um transcript de exemplo); só
+Zime usa promptfoo, como runner fino.
 
 ## Files worth consulting in future tasks
 
