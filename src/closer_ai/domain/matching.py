@@ -66,10 +66,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from itertools import pairwise
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from closer_ai.domain._chain import linear_chain
 from closer_ai.domain.deal import Deal
 from closer_ai.normalization.models import Call
 
@@ -395,45 +397,24 @@ def _chain_head(
     call_id: str, decisions: list[MatchDecision]
 ) -> tuple[MatchDecision | None, bool]:
     """(head, ok). ok=False means the history is not one linear chain (fork, dangling
-    supersession, several roots, cycle) — never repaired by picking a winner."""
-    by_id: dict[str, MatchDecision] = {}
+    supersession, several roots, cycle, automatic over manual) — never repaired by picking a
+    winner."""
     for decision in decisions:
         if decision.call_id != call_id:
             raise ValueError(
                 f"decision {decision.match_decision_id} belongs to call {decision.call_id!r}, "
                 f"not {call_id!r}"
             )
-        seen = by_id.get(decision.match_decision_id)
-        if seen is not None and seen != decision:
-            raise ValueError(
-                f"same match_decision_id with different payload: {decision.match_decision_id}"
-            )
-        by_id[decision.match_decision_id] = decision
-    if not by_id:
-        return None, True
-
-    roots = [d for d in by_id.values() if d.supersedes_decision_id is None]
-    child_of: dict[str, MatchDecision] = {}
-    for decision in by_id.values():
-        parent = decision.supersedes_decision_id
-        if parent is None:
-            continue
-        if parent not in by_id or parent in child_of:
-            return None, False
-        child_of[parent] = decision
-    if len(roots) != 1:
+    chain = linear_chain(
+        decisions, lambda d: d.match_decision_id, lambda d: d.supersedes_decision_id
+    )
+    if chain is None:
         return None, False
-
-    head, length = roots[0], 1
-    while head.match_decision_id in child_of:
-        child = child_of[head.match_decision_id]
-        if head.decided_by == "manual" and child.decided_by == "automatic":
+    for parent, child in pairwise(chain):
+        if parent.decided_by == "manual" and child.decided_by == "automatic":
             # only reachable if something other than append_match_decision wrote the history
             return None, False
-        head, length = child, length + 1
-    if length != len(by_id):
-        return None, False
-    return head, True
+    return (chain[-1] if chain else None), True
 
 
 def resolve_current_match(call_id: str, decisions: list[MatchDecision]) -> CurrentMatchResult:
