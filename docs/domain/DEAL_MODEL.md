@@ -108,6 +108,11 @@ Append-only, sem constraint de unicidade em `(deal_id, stage)` — reentrar no m
 
 ### DealOutcome: enum, não entidade
 
+> **Desde o ADR-001 (D-M1):** `Deal.outcome`/`closed_at` são a **projeção legada do estado do
+> CRM**, não o outcome comercial canônico. O canônico vive em `src/closer_ai/domain/outcome.py`
+> (`resolve_current_outcome`) e nunca é derivado deste campo. O campo continua como está, por
+> compatibilidade — ver [`ADR_001`](../decisions/ADR_001-outcome-contract-v0.md).
+
 Fica como `Literal` em `Deal`, não promovido a entidade própria — não tem identidade,
 lifecycle ou necessidade de auditoria própria hoje (ninguém pediu "outcome voltou de WON pra
 OPEN, mostra por quê"). `STALE` foi avaliado e descartado: precisaria de um threshold de

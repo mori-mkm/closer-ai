@@ -2,6 +2,10 @@
 
 Design decisions worth knowing:
 
+- `Deal.outcome`/`closed_at` are the legacy projection of the CRM's state (ADR-001, D-M1),
+  NOT the canonical commercial outcome. The canonical outcome lives in domain/outcome.py
+  (OutcomeEvidence / EvidenceDisposition / OutcomeAssessment, resolve_current_outcome) and is
+  never derived from this field. Kept unchanged for backward compatibility.
 - Deal is the sole owner of commercial outcome. Call (closer_ai.normalization.Call) never has
   one — a Deal can have zero, one, or many Calls, and the sale exists exactly once, on the
   Deal, never duplicated per call.
