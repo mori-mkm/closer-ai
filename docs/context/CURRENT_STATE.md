@@ -55,6 +55,7 @@ Call outcome != Deal outcome. Esta distinção já está implementada como invar
 | Agro normalization pipeline | PARTIAL / BLOCKED ON DATA | Passa 100% dos testes sintéticos, mas nunca processou uma call real. Formato de origem (shape do Zoom, unidade de `duration_seconds`, id estável de participante) é hipótese, não confirmado. |
 | Call↔Deal matching | PARTIAL / BLOCKED ON DATA | Contrato + 1 matcher determinístico existem; nunca rodou contra Lead/Deal reais do Kommo. Sem heurística de nome/email/telefone (Participant não carrega email/telefone). |
 | Objection Golden Set | PARTIAL (sintético apenas) | 9 exemplos sintéticos, um único autor, sem double-annotation, sem cálculo de agreement. Não é o "Golden Set real" do roadmap (20-30 calls reais anotadas). |
+| Golden Set Annotation Protocol v1 | DRAFTED (doc, pré-pilot) | `docs/evals/GOLDEN_SET_ANNOTATION_PROTOCOL_V1.md`; nenhum dado real anotado; bloqueado por autorização de dados reais, pilot D3 (3–5 calls, dupla anotação) e D6 (`resolution_status`); taxonomia final pendente |
 | Objection taxonomy | PARTIAL (v0, 4 categorias fechadas) | `price`, `timing_priority`, `trust_authority`, `no_need`, `other` (inatingível pela extração v0). Taxonomia completa é fase futura. |
 
 ## Blocked
