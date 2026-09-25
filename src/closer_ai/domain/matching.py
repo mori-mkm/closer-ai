@@ -66,12 +66,11 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from itertools import pairwise
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from closer_ai.domain._chain import linear_chain
+from closer_ai.domain._chain import authority_chain_head, cas_append
 from closer_ai.domain.deal import Deal
 from closer_ai.normalization.models import Call
 
@@ -399,22 +398,22 @@ def _chain_head(
     """(head, ok). ok=False means the history is not one linear chain (fork, dangling
     supersession, several roots, cycle, automatic over manual) — never repaired by picking a
     winner."""
+    _check_call(call_id, decisions)
+    return authority_chain_head(
+        decisions,
+        lambda d: d.match_decision_id,
+        lambda d: d.supersedes_decision_id,
+        lambda d: d.decided_by,
+    )
+
+
+def _check_call(call_id: str, decisions: list[MatchDecision]) -> None:
     for decision in decisions:
         if decision.call_id != call_id:
             raise ValueError(
                 f"decision {decision.match_decision_id} belongs to call {decision.call_id!r}, "
                 f"not {call_id!r}"
             )
-    chain = linear_chain(
-        decisions, lambda d: d.match_decision_id, lambda d: d.supersedes_decision_id
-    )
-    if chain is None:
-        return None, False
-    for parent, child in pairwise(chain):
-        if parent.decided_by == "manual" and child.decided_by == "automatic":
-            # only reachable if something other than append_match_decision wrote the history
-            return None, False
-    return (chain[-1] if chain else None), True
 
 
 def resolve_current_match(call_id: str, decisions: list[MatchDecision]) -> CurrentMatchResult:
@@ -442,37 +441,16 @@ def append_match_decision(
     redelivery or a no-op re-decision); raises MatchDecisionConflict for a stale expected
     head, a forked history, or an automatic decision over a manual one; ValueError for
     same id + different payload or a decision from another call."""
-    head, ok = _chain_head(decision.call_id, history)
-    if not ok:
-        raise MatchDecisionConflict("history is not a linear chain; manual repair required")
-
-    existing = next(
-        (d for d in history if d.match_decision_id == decision.match_decision_id), None
+    _check_call(decision.call_id, history)
+    return cas_append(
+        history,
+        decision,
+        record_id=lambda d: d.match_decision_id,
+        parent_id=lambda d: d.supersedes_decision_id,
+        decided_by=lambda d: d.decided_by,
+        result=lambda d: (d.status, d.deal_id),
+        conflict=MatchDecisionConflict,
     )
-    if existing is not None:
-        if existing != decision:
-            raise ValueError(
-                f"same match_decision_id with different payload: {decision.match_decision_id}"
-            )
-        return list(history)
-
-    actual_head = head.match_decision_id if head is not None else None
-    if decision.supersedes_decision_id != actual_head:
-        raise MatchDecisionConflict(
-            f"stale write: expected head {decision.supersedes_decision_id!r}, "
-            f"actual head {actual_head!r}; reload and recompute"
-        )
-
-    if head is not None:
-        same_result = (head.status, head.deal_id) == (decision.status, decision.deal_id)
-        upgrades_authority = head.decided_by == "automatic" and decision.decided_by == "manual"
-        if same_result and not upgrades_authority:
-            return list(history)
-        if head.decided_by == "manual" and decision.decided_by == "automatic":
-            raise MatchDecisionConflict(
-                "current decision is manual; only another manual decision can replace it"
-            )
-    return [*history, decision]
 
 
 def decision_from_matcher_output(
