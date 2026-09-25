@@ -12,7 +12,10 @@ Structure only, no business rules:
   any other Deal requires a manual decision. Name, closer, pipeline or dates never link.
 - "not_a_deal" (e.g. a card that is only an operational/automation action) is manual only:
   no automatic signal for it exists yet (open business decision).
-- when ingestion should found a Deal, and how the matcher uses this, are out of scope.
+- foundation (DI-M1 = 7a) is explicit: `found_deal` is called by a caller that decided a record
+  is a new negotiation; ingestion never founds a Deal per card. A founding decision is the
+  self-link (`founds_deal`), and a founder record stays linked to its Deal forever in v0 (no
+  relink/unlink; repair/merge deferred). How the matcher uses identity is out of scope.
 """
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from closer_ai.domain._chain import authority_chain_head, cas_append
-from closer_ai.domain.deal import derive_deal_id
+from closer_ai.domain.deal import Deal, derive_deal_id
 
 DEAL_IDENTITY_SCHEMA_VERSION = "1.0.0"
 
@@ -89,6 +92,13 @@ class DealIdentityDecision(BaseModel):
     @property
     def source_record_key(self) -> str:
         return derive_source_record_key(self.company_id, self.provider, self.external_record_id)
+
+    @property
+    def founds_deal(self) -> bool:
+        """A founding (self-link) decision: the record linked to the Deal it founds."""
+        return self.status == "linked" and self.deal_id == derive_deal_id(
+            self.company_id, self.provider, self.external_record_id
+        )
 
     @model_validator(mode="after")
     def _check_invariants(self) -> DealIdentityDecision:
@@ -173,7 +183,9 @@ def resolve_deal_for_source_record(
 ) -> CurrentDealIdentity:
     _check_record(source_record_key, decisions)
     head, ok = authority_chain_head(decisions, _id, _parent, _by)
-    if not ok:
+    if not ok or (_was_founded(decisions) and head is not None and not head.founds_deal):
+        # a founder that stopped being linked to its Deal can only come from a history written
+        # outside append_deal_identity_decision: never resolved by picking a side
         return CurrentDealIdentity(source_record_key=source_record_key, state="conflict")
     if head is None:
         return CurrentDealIdentity(source_record_key=source_record_key, state="no_decision")
@@ -194,6 +206,9 @@ def append_deal_identity_decision(
     Same id + different payload: ValueError. Stale head, fork, automatic over manual:
     DealIdentityConflict (reload and re-decide)."""
     _check_record(decision.source_record_key, history)
+    head, ok = authority_chain_head(history, _id, _parent, _by)
+    if ok and decision.supersedes_decision_id == (head.identity_decision_id if head else None):
+        _check_foundation_rules(history, head, decision)
     return cas_append(
         history,
         decision,
@@ -203,3 +218,71 @@ def append_deal_identity_decision(
         result=lambda d: (d.status, d.deal_id, frozenset(d.candidate_deal_ids)),
         conflict=DealIdentityConflict,
     )
+
+
+def _was_founded(decisions: list[DealIdentityDecision]) -> bool:
+    return any(d.founds_deal for d in decisions)
+
+
+def _check_foundation_rules(
+    history: list[DealIdentityDecision],
+    head: DealIdentityDecision | None,
+    decision: DealIdentityDecision,
+) -> None:
+    """Foundation (DI-M1 = 7a):
+    - a founder record stays linked to the Deal it founded: no relink, no unlink (the founded
+      Deal would be orphaned); a wrong foundation needs a future repair/merge operation;
+    - a foundation never replaces a link to another Deal, and an automatic foundation never
+      replaces an ambiguity (not_a_deal and manual decisions are already protected by the
+      manual-authority rule)."""
+    if _was_founded(history) and not decision.founds_deal:
+        raise DealIdentityConflict(
+            "founder link is stable: a record that founded a Deal cannot be relinked or "
+            "unlinked (repair/merge is deferred)"
+        )
+    if decision.founds_deal and head is not None and not head.founds_deal:
+        if head.status == "linked":
+            raise DealIdentityConflict("record is already linked to another Deal; not founding")
+        if head.status == "ambiguous" and decision.decided_by == "automatic":
+            raise DealIdentityConflict("an automatic foundation cannot erase an ambiguity")
+
+
+def found_deal(
+    deal: Deal,
+    history: list[DealIdentityDecision],
+    *,
+    decided_by: IdentityDecidedBy,
+    decided_at: datetime,
+) -> tuple[DealIdentityDecision, list[DealIdentityDecision]]:
+    """Explicit foundation of `deal` by its own source record (deal.company_id, deal.source,
+    deal.external_id). Returns (founding decision, new identity history of that record).
+
+    Never called by ingestion for every card: a caller decides this record is a new
+    negotiation. The Deal itself (stage, legacy outcome, dates) is built by the caller from the
+    record's projection; nothing here invents those values or creates an OutcomeAssessment.
+    Idempotent: if the record already founded this Deal, the existing decision is returned and
+    history is unchanged. Refused (DealIdentityConflict) if the record is linked to another
+    Deal; if an automatic foundation would replace an ambiguity or any manual decision
+    (including not_a_deal); or if the history is not linear."""
+    key = derive_source_record_key(deal.company_id, deal.source, deal.external_id)
+    current = resolve_deal_for_source_record(key, history)
+    if current.state == "conflict":
+        raise DealIdentityConflict("identity history is not linear; manual repair required")
+    if current.state == "linked" and current.deal_id == deal.deal_id:
+        existing = next(d for d in history if d.identity_decision_id == current.decision_id)
+        return existing, list(history)
+
+    decision = DealIdentityDecision(
+        identity_decision_id=derive_deal_identity_decision_id(
+            key, "linked", deal.deal_id, (), decided_by, current.decision_id, decided_at
+        ),
+        company_id=deal.company_id,
+        provider=deal.source,
+        external_record_id=deal.external_id,
+        status="linked",
+        deal_id=deal.deal_id,
+        decided_by=decided_by,
+        supersedes_decision_id=current.decision_id,
+        created_at=decided_at,
+    )
+    return decision, append_deal_identity_decision(history, decision)

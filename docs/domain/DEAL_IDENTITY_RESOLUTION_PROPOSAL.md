@@ -1,6 +1,7 @@
 # Deal Identity Resolution (DEP-2) — Proposal
 
-Status: **PROPOSAL — contrato estrutural implementado** (`src/closer_ai/domain/deal_identity.py`).
+Status: **PROPOSAL — contrato estrutural e política de fundação implementados**
+(`src/closer_ai/domain/deal_identity.py`). DI-M1 = 7a e DI-M2 = D decididos por Matheus.
 Política de fundação de Deals e integração com o matcher dependem de decisões de Matheus e Gabriel
 listadas no fim.
 
@@ -132,7 +133,7 @@ e "card aberto vence" são proibidos.
   `call.source_id` → source record → Deal via `resolve_deal_for_source_record`; o resolver de
   match atual **não muda**.
 
-## 7. Decisão arquitetural pendente (bloqueia a política de fundação e o matcher, não o contrato)
+## 7. Fundação de Deals — **DI-M1 = 7a (decidido)**
 
 Como Deals nascem, dado que hoje Deal = card:
 
@@ -143,6 +144,27 @@ Como Deals nascem, dado que hoje Deal = card:
 
 **Recomendação: 7a** + regra "nenhum Deal é criado automaticamente por card" + fusão de Deals
 **deferred** (enquanto não houver ingestão real de CRM, não há Deals duplicados a fundir).
+
+### 7.1 Foundation semantics (implementado)
+
+- **Explícita:** `found_deal(deal, history, *, decided_by, decided_at)` é chamada por quem decidiu
+  que o registro é uma negociação nova. Nenhuma função funda um Deal por card na ingestão.
+- **Self-link = fundação:** a decisão fundadora é `linked` com `deal_id ==
+  derive_deal_id(company_id, provider, external_record_id)` (`founds_deal`). `deal_id` não mudou.
+- **Campos do Deal:** `current_stage`, `outcome` e `created_at` são obrigatórios em `Deal` e vêm da
+  projeção legada do card, montada pelo caller; a fundação não inventa esses valores, não lê
+  `Deal.outcome` como canônico e não cria `OutcomeAssessment` (limitação: `Deal` ainda exige dados
+  de card que não são de identidade).
+- **Idempotente:** registro que já fundou o Deal → decisão existente, histórico inalterado.
+- **Fundador estável:** um registro que fundou um Deal não pode ser religado nem desligado
+  (`DealIdentityConflict`); fundação errada exige repair/merge futuro. Histórico escrito por fora
+  que viole isso resolve para `conflict`.
+- **Recusas:** registro já `linked` a outro Deal; `ambiguous` com fundação automática;
+  `not_a_deal` ou decisão manual com fundação automática (regra de autoridade manual); histórico
+  não linear. Fundação manual pode substituir `unresolved`, `ambiguous` e `not_a_deal`
+  (decisão humana explícita, linear).
+- **Registros adicionais:** nunca fundados nem ligados automaticamente; ligar outro card ao Deal
+  fundado continua sendo `DealIdentityDecision` manual normal.
 
 ## 8. Invariants (para a implementação)
 
@@ -183,8 +205,8 @@ Como Deals nascem, dado que hoje Deal = card:
 
 | # | Pergunta | Dono |
 |---|---|---|
-| DI-M1 | Aprovar 7a (Deal fundado por card, nenhum Deal automático por card, fusão deferred) ou 7b | Matheus |
-| DI-M2 | D sozinha (sem `SourceRecord` em v0) — **adotada** no contrato implementado; reverter se o card precisar de atributos próprios além de evidências | Matheus |
+| DI-M1 | **Decidido: 7a** (Deal fundado por card, nenhum Deal automático por card, fusão deferred) | Matheus |
+| DI-M2 | **Decidido: D sozinha** (sem `SourceRecord` em v0); rever se o card precisar de atributos próprios além de evidências | Matheus |
 | DI-M3 | ADR após validação de Gabriel | Matheus |
 | DI-G1 | O Kommo registra reabertura/continuação ou vínculo entre cards? | Gabriel |
 | DI-G2 | Quando um card novo do mesmo lead é continuação vs nova negociação? | Gabriel |
@@ -202,7 +224,7 @@ vence"; "card aberto vence"; dedup automático/fuzzy/LLM; `SourceRecord` + MDM c
    `derive_deal_identity_decision_id`, `resolve_deal_for_source_record`,
    `append_deal_identity_decision` (CAS, autoridade manual), reusando `_chain.linear_chain`.
    Aditivo; `Deal`, matching e Outcome intocados. Testes: `tests/unit/domain/test_deal_identity.py`.
-2. **Após DI-M1:** política de fundação na ingestão (nenhum Deal automático por card).
+2. **Feito:** política de fundação — `found_deal` (§7.1).
 3. **Depois (separado):** matcher consulta identidade para gerar candidatos; atribuição de
    `OutcomeEvidence` exige card `linked` (write path).
 4. Fora: fusão de Deals, sinais automáticos, adapter Kommo.
