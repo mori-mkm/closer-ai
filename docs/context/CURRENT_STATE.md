@@ -57,6 +57,7 @@ Call outcome != Deal outcome. Esta distinção já está implementada como invar
 | Objection Golden Set | PARTIAL (sintético apenas) | 9 exemplos sintéticos, um único autor, sem double-annotation, sem cálculo de agreement. Não é o "Golden Set real" do roadmap (20-30 calls reais anotadas). |
 | Golden Set Annotation Protocol v1 | DRAFTED (doc, pré-pilot) | `docs/evals/GOLDEN_SET_ANNOTATION_PROTOCOL_V1.md`; nenhum dado real anotado; bloqueado por autorização de dados reais, pilot D3 (3–5 calls, dupla anotação) e D6 (`resolution_status`); taxonomia final pendente |
 | Objection Annotation Guideline v0 | DRAFTED (doc, pré-pilot) | `docs/evals/OBJECTION_ANNOTATION_GUIDELINE_V0.md`; categorias = enum v0 provisório; não usada em dado real; depende de D3, D6 e taxonomia final (TAX) |
+| Synthetic Annotation Calibration Kit v0 | DRAFTED (pronto para dry run) | `docs/evals/calibration/` — 3 calls sintéticas, templates manuais, referência de calibração (não é gold); nenhum dry run executado; anotadores não calibrados; D3, D6 e TAX abertos |
 | Objection taxonomy | PARTIAL (v0, 4 categorias fechadas) | `price`, `timing_priority`, `trust_authority`, `no_need`, `other` (inatingível pela extração v0). Taxonomia completa é fase futura. |
 
 ## Blocked
