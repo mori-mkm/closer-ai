@@ -59,6 +59,7 @@ Call outcome != Deal outcome. Esta distinção já está implementada como invar
 | Objection Annotation Guideline v0 | DRAFTED (doc, pré-pilot) | `docs/evals/OBJECTION_ANNOTATION_GUIDELINE_V0.md`; categorias = enum v0 provisório; não usada em dado real; depende de D3, D6 e taxonomia final (TAX) |
 | Synthetic Annotation Calibration Kit v0 | DRAFTED (pronto para dry run) | `docs/evals/calibration/` — 3 calls sintéticas, templates manuais, referência de calibração (não é gold); nenhum dry run executado; anotadores não calibrados; D3, D6 e TAX abertos |
 | Call Intelligence Taxonomy v0.1 | PROPOSAL (doc, research-integrated, pré-pilot) | `docs/domain/CALL_INTELLIGENCE_TAXONOMY_V0_1_PROPOSAL.md` — integra pesquisa externa ao contrato `ObjectionEpisode`; sem mudança de contrato, enum, schema ou guideline; 8 categorias aprovadas só como candidatas provisórias v0.1 (CIT-M3), enum do domínio inalterado, contrato gated por pilot/D7; nenhum RAG/Knowledge Base implementado; TAX, D3 e D6 abertos |
+| Sales Knowledge Base v0.1 | DRAFTED (doc, pré-pilot) | `docs/knowledge/sales/` — 8 knowledge units provisórias de categorias de objeção candidatas + source registry (`SOURCES.md`); conhecimento define/explica, nunca prova ocorrência numa call; nenhum RAG/retrieval/embedding implementado; enum do domínio inalterado; TAX, D3 e D6 abertos |
 | Objection taxonomy | PARTIAL (v0, 4 categorias fechadas) | `price`, `timing_priority`, `trust_authority`, `no_need`, `other` (inatingível pela extração v0). Taxonomia completa é fase futura. |
 
 ## Blocked
