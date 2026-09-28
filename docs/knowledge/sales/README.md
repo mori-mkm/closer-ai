@@ -124,8 +124,6 @@ objeção).
 - A guideline v0 usa "Está caro e preciso falar com meu sócio" como exemplo inequívoco de
   `trust_authority`; esta base (seguindo a pesquisa e o proposal) trata a mera consulta a sócio como
   insuficiente para AUTHORITY. Item da guideline v0.1.
-- `docs/references/OPEN_SOURCE_REUSE_AUDIT.md` ainda não está em `main` (links para ele nos docs de evals
-  estão quebrados).
 
 ## Versioning
 
