@@ -325,8 +325,10 @@ em uma linha, qual é o bloqueio — é o insumo para ADD/MERGE em TAX.
 | **UNKNOWN** | a pergunta se aplica, mas **não há informação suficiente** (ilegível, cortado, speaker incerto, sentido fora da call) | "[inaudível]… não dá desse jeito." — há barreira, categoria indeterminável |
 | **AMBIGUOUS** | há informação, mas **duas ou mais leituras seguem plausíveis**; registre as candidatas | "Isso é bastante dinheiro." — comentário, preocupação ou PRICE_BUDGET? Sem contexto: AMBIGUOUS |
 
-Vale para detecção (é objeção?), categoria, fronteira e resolução. Não converta incerteza em categoria
-por conveniência. UNKNOWN não é "difícil": se a evidência basta, decida. N/A só quando a pergunta não se
+Vale para detecção (é objeção?), categoria, fronteira e reação. Na resolução, o **valor** de
+`resolution_status` continua sendo um dos quatro do contrato: reação AMBIGUOUS ou UNKNOWN →
+`resolution_status = unknown`, com AMBIGUOUS/UNKNOWN registrado como status da anotação e as leituras em
+nota. Não converta incerteza em categoria por conveniência. UNKNOWN não é "difícil": se a evidência basta, decida. N/A só quando a pergunta não se
 aplica estruturalmente (call ABSENT, call não anotável).
 
 ## Episode boundaries
@@ -405,10 +407,17 @@ frequência e divergência. Não é mudança de contrato; é OPEN GAP para D6.
 **Diagnostic:** a pergunta **pede informação** sobre a resposta do closer, ou **reafirma, em forma de
 pergunta, que a barreira continua**?
 
-- Pede informação ("E como vocês fariam a migração sem parar o sistema?") → CLARIFICATION (GL-3).
-- Reafirma a barreira ("E eu vou pagar isso tudo de novo no ano que vem?", "Vocês acham mesmo que a
-  gente consegue pagar isso?") → REJECT, como qualquer reafirmação.
-- As duas leituras seguem plausíveis → marque a resolução como AMBIGUOUS com as candidatas.
+- **Claramente pede informação** ("E como vocês fariam a migração sem parar o sistema?") → CLARIFICATION
+  (GL-3): não implica ACCEPT nem REJECT; se for a única reação substantiva disponível, `resolution_status
+  = unknown`.
+- **Claramente reafirma a barreira** ("E eu vou pagar isso tudo de novo no ano que vem?", "Vocês acham
+  mesmo que a gente consegue pagar isso?") → REJECT; aplique as regras normais de resolução
+  (tipicamente `unresolved`, se o mesmo bloqueio permanece).
+- **As duas leituras seguem plausíveis** → a **reação/interpretação** é AMBIGUOUS (registre as leituras
+  candidatas) e `resolution_status = unknown`.
+
+AMBIGUOUS é status de incerteza da anotação, **nunca** valor de `resolution_status`, que só aceita
+`resolved`, `partially_resolved`, `unresolved` ou `unknown`. Nenhum enum novo; D6 continua aberta.
 
 ## Resolution
 
