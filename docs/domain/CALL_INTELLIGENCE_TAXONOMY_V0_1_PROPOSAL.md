@@ -584,7 +584,7 @@ proveniência do run (D4: versão da taxonomia/knowledge), nunca no episódio.
 
 | ID | Pergunta | Quem/como fecha |
 |---|---|---|
-| CIT-O1 | Com CIT-M3 aprovada: o label set de categoria do pilot D3 é o das 8 candidatas ou o enum v0? (decisão da guideline v0.1, não do contrato) | task da guideline v0.1 + workshop TAX (Gabriel + Otávio) |
+| CIT-O1 | Com CIT-M3 aprovada: o label set de categoria do pilot D3 é o das 8 candidatas ou o enum v0? (decisão da guideline v0.1, não do contrato) | **APPROVED** (Matheus, 2026-09-28): 8 candidatas + OTHER/UNKNOWN/AMBIGUOUS como label set de anotação/eval do D3 e do Golden Set v1; enum do domínio inalterado; ver `OBJECTION_ANNOTATION_GUIDELINE_V0_1.md` |
 | CIT-O2 | NEED/VALUE/FIT e TRUST/RISK: fundir fica? | notas do pilot |
 | CIT-O3 | Fronteira concern × objection e brush-off × timing | divergências DETECTION/CATEGORY do pilot |
 | CIT-O4 | REQUESTS_CLARIFICATION como última resposta: não-sobrescrevente? | guideline v0.1 + D6 |
