@@ -188,7 +188,7 @@ classifica CONDITION como WEAK–MODERATE / NOT SUPPORTED e não define IMPLICIT
 | `trust_authority` | `AUTHORITY_INTERNAL_BUY_IN` + `TRUST_RISK` | **split** — não há lifting determinístico |
 | `other` | `COMPETITION_EXISTING_SOLUTION`, `IMPLEMENTATION_INTEGRATION`, `TERMS_PROCESS`, `OTHER` | split do resíduo |
 
-**CONFLICT (CIT-M3):** o contrato fixa `category` = enum v0 inalterado. Adotar as 8 categorias no
+**CONFLICT (CIT-M3 — APPROVED como candidatas, sem mudar o enum):** o contrato fixa `category` = enum v0 inalterado. Adotar as 8 categorias no
 `ObjectionEpisode` é mudança de contrato e muda `episode_id` (valor string entra no hash). Hoje o
 custo é zero (nada implementado, nenhum gold), mas cresce a cada gold produzido. Decisão humana
 necessária — ver Decisions.
@@ -554,7 +554,7 @@ proveniência do run (D4: versão da taxonomia/knowledge), nunca no episódio.
 | Objection (barreira ao avanço) | 4 testes da guideline | ALIGNED | KEEP | GUIDELINE |
 | Atomic objection vs resistance episode | uma categoria por episódio; mesma âncora para várias | ALIGNED (contrato = opção atômica) | KEEP CURRENT CONTRACT (CIT-M2) | DOMAIN (já existe) |
 | Resistance type (6) | inexistente; parte em GL-2 | NEW_CONCEPT | OBJECTION adotado; HESITATION/BRUSH_OFF regras PROVISIONAL; COUNTERARGUMENT/CONDITION DEFER; IMPLICIT REJECT | GUIDELINE / REFERENCE_ONLY |
-| Objection category (8) | enum v0 (5 valores) no contrato | **CONFLICT** | candidatas provisórias; adoção no contrato = decisão humana (CIT-M3) | TAXONOMY |
+| Objection category (8) | enum v0 (5 valores) no contrato | **CONFLICT** | candidatas provisórias v0.1 (CIT-M3 APPROVED); enum do domínio inalterado; contrato só via pilot/D7 | TAXONOMY |
 | NEED_VALUE_FIT / TRUST_RISK | `no_need` / `trust_authority` | CONFLICT (split/alarga) | provisórias, AC | TAXONOMY |
 | Seller Response (10, multilabel) | só segmentos do closer + count derivado; Strategy DEFER | NEW_CONCEPT | DEFER (CIT-M4) | futuro TAXONOMY/RAG |
 | Prospect Reaction (10) | 6 rótulos de resposta, julgados, não armazenados | PARTIAL (GAP: clarificação) | mapear; manter derivado (CIT-M5) | GUIDELINE |
@@ -574,7 +574,7 @@ proveniência do run (D4: versão da taxonomia/knowledge), nunca no episódio.
 |---|---|---|---|
 | CIT-M1 | SalesResistance vira entidade? | Não. Conceito classificatório | PROPOSED (sem mudança de contrato) |
 | CIT-M2 | ObjectionEpisode continua unidade fundamental? | Sim; contrato já é a opção atômica | PROPOSED — KEEP CURRENT CONTRACT |
-| CIT-M3 | As 8 categorias entram como provisional v0.1? | Como **candidatas para o workshop TAX**. Recomendação: se Gabriel + Otávio aceitarem, a guideline v0.1 usa as 8 no pilot D3 (labels de anotação); o enum do contrato `ObjectionEpisode` só muda em D7, depois do pilot (antes de existir gold não-pilot, para não regenerar ids). `ObjectionEvent` v0 **nunca** muda (D1). Alternativa: pilot com enum v0 e 8 categorias só como referência | **OPEN — humano** (CONFLICT com §6/§18) |
+| CIT-M3 | As 8 categorias entram como provisional v0.1? | Sim: as 8 são **candidatas provisórias de taxonomia v0.1**. **Não** mudam o enum do domínio nesta proposta (`ObjectionCategory` v0 e o `category` do contrato `ObjectionEpisode` inalterados; `ObjectionEvent` v0 nunca muda, D1). Implementação no contrato continua **gated por evidência do pilot / D7** | **APPROVED** (Matheus, 2026-09-28) |
 | CIT-M4 | Seller Response é multilabel? | Sim conceitualmente, ancorado em `segment_id`; taxonomia inteira DEFER, fora do pilot | PROPOSED |
 | CIT-M5 | Prospect Reaction armazenada ou derivada? | Derivada/julgada; single-label por resposta; vocabulário da pesquisa mapeado para rótulos do contrato | PROPOSED — KEEP CURRENT CONTRACT |
 | CIT-M6 | D6 muda com a pesquisa? | Não. Pesquisa reforça REJECT → `unresolved` no caso estabelecido; `partially_resolved` sem suporte de fonte além do MIXED | D6 **OPEN** |
@@ -584,7 +584,7 @@ proveniência do run (D4: versão da taxonomia/knowledge), nunca no episódio.
 
 | ID | Pergunta | Quem/como fecha |
 |---|---|---|
-| CIT-O1 | Pilot usa 8 categorias ou enum v0? (CIT-M3) | workshop TAX (Gabriel + Otávio) |
+| CIT-O1 | Com CIT-M3 aprovada: o label set de categoria do pilot D3 é o das 8 candidatas ou o enum v0? (decisão da guideline v0.1, não do contrato) | task da guideline v0.1 + workshop TAX (Gabriel + Otávio) |
 | CIT-O2 | NEED/VALUE/FIT e TRUST/RISK: fundir fica? | notas do pilot |
 | CIT-O3 | Fronteira concern × objection e brush-off × timing | divergências DETECTION/CATEGORY do pilot |
 | CIT-O4 | REQUESTS_CLARIFICATION como última resposta: não-sobrescrevente? | guideline v0.1 + D6 |
@@ -601,7 +601,7 @@ Tudo abaixo é **PROVISIONAL** até o pilot.
    AMBIGUOUS/UNKNOWN; brush-off sem motivo → AMBIGUOUS; condição e contra-argumento → OBJECTION;
    resistência implícita não se anota.
 3. **Categoria:** 8 candidatas + `OTHER`; UNKNOWN/AMBIGUOUS como status. Cada uma com evidência
-   mínima, `often_confused_with`, ao menos um falsifying example e nível de fonte. Sujeito a CIT-M3.
+   mínima, `often_confused_with`, ao menos um falsifying example e nível de fonte. Candidatas aprovadas (CIT-M3); enum do domínio inalterado.
 4. **Handling:** como hoje (segmentos do closer em contexto). Sem taxonomia de resposta.
 5. **Reação:** rótulos do contrato; vocabulário da pesquisa como guia.
 6. **Resolução:** 4 valores do contrato; `partially_resolved` = MIXED (mesma categoria); D6 aberta.
@@ -619,9 +619,9 @@ infraestrutura de RAG/knowledge (retrieval, embeddings, vector DB); Challenger/S
 
 ## Next steps
 
-1. Revisão humana deste documento; decidir **CIT-M3** no workshop TAX (Gabriel + Otávio).
+1. Revisão humana deste documento. **CIT-M3 APPROVED** (candidatas v0.1, enum inalterado); CIT-O1 no workshop TAX (Gabriel + Otávio).
 2. Mergear `docs/reference-repos-audit` (ou corrigir os links para `../references/` em `main`).
-3. Guideline v0.1 (task própria, **depois** de CIT-M3): categorias no template existente com nível de
+3. Guideline v0.1 (task própria): categorias no template existente com nível de
    fonte; corrigir o exemplo "sócio"; regras de hesitação/brush-off/status quo; cadeia
    evidence → observation → interpretation; mapeamento de reação; CIT-O4.
 4. Dry run do calibration kit; depois pilot D3 com a guideline vigente; registrar notas NEED/VALUE/FIT
