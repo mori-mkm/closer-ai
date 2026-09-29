@@ -235,3 +235,26 @@ def test_model_is_required():
         OllamaClassificationProvider()  # type: ignore[call-arg]
     with pytest.raises(ValueError):
         OllamaClassificationProvider(model="")
+
+
+def test_config_matches_request_and_has_no_secret(fake):
+    fake.reply("{}")
+    p = provider(fake, timeout=7, num_ctx=4096)
+    p.classify("x")
+    body = fake.requests[0][1]
+    c = p.config
+    assert c == {"base_url": fake.url, "timeout": 7, "format": "json", "think": False, "temperature": 0,
+                 "num_ctx": 4096}
+    assert (body["format"], body["think"], body["options"]) == (
+        c["format"], c["think"], {"temperature": c["temperature"], "num_ctx": c["num_ctx"]})
+
+
+def test_usage_reset_when_a_later_call_fails(fake):
+    p = provider(fake)
+    fake.reply("{}", eval_count=3)
+    p.classify("x")
+    assert p.last_usage == {"eval_count": 3}
+    fake.status = 500
+    with pytest.raises(OllamaError):
+        p.classify("x")
+    assert p.last_usage == {}
