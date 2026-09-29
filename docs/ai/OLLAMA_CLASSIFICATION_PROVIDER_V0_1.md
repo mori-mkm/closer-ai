@@ -68,8 +68,11 @@ request per call: no retry, backoff or fallback model.
 ## Metadata and privacy
 
 `run.provider == "ollama"`, `run.model` = the exact model name (existing run fields). Ollama's
-`prompt_eval_count`, `eval_count` and `total_duration` (ns) are kept in `provider.last_usage` —
-observational, not in the run, the digests or prediction identity. The provider receives only the
+`prompt_eval_count`, `eval_count` and `total_duration` (ns) are kept in `provider.last_usage` (reset at
+the start of each call) — observational, not in the run, the digests or prediction identity.
+`provider.config` exposes `base_url`, `timeout`, `format`, `think`, `temperature`, `num_ctx` (the values
+actually sent) for the [Experiment Runner](EXPERIMENT_RUNNER_V0_1.md), which records both per run.
+The provider receives only the
 prompt (no Deal/Outcome/CRM/stage), logs nothing and writes nothing to disk.
 
 ## Local smoke

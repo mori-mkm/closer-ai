@@ -47,3 +47,6 @@ Thumbs.db
 .claude/worktrees/
 !.claude/agents/
 !.claude/agents/**
+
+# --- experiment artifacts (local runs; regenerate, never commit) ---
+artifacts/

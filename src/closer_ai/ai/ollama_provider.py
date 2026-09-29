@@ -65,16 +65,25 @@ class OllamaClassificationProvider:
         # ponytail: Ollama silently truncates prompts longer than num_ctx (default 2-4k) — size it
         # to the largest arm; compare `last_usage["prompt_eval_count"]` when in doubt.
         self.num_ctx = num_ctx
-        self.last_usage: dict[str, Any] = {}  # observational only; not part of the run identity
+        # Observational usage of the latest classify() call (reset at each call; single-threaded).
+        self.last_usage: dict[str, Any] = {}
+
+    @property
+    def config(self) -> dict[str, Any]:
+        """Generation configuration for run provenance (no secrets; not part of the prompt digest)."""
+        return {"base_url": self.base_url, "timeout": self.timeout, "format": "json", "think": False,
+                "temperature": 0, "num_ctx": self.num_ctx}
 
     def classify(self, prompt: str) -> Mapping[str, Any]:
+        self.last_usage = {}
+        c = self.config
         body = json.dumps({
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "format": "json",
-            "think": False,
-            "options": {"temperature": 0, "num_ctx": self.num_ctx},
+            "format": c["format"],
+            "think": c["think"],
+            "options": {"temperature": c["temperature"], "num_ctx": c["num_ctx"]},
         }).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}/api/generate", data=body, headers={"Content-Type": "application/json"}
