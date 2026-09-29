@@ -3,6 +3,10 @@
 Status: **PROPOSAL — não implementado.** Nenhum código, dependência, índice, embedding, vector DB,
 prompt ou chamada de LLM é criado por este documento. Nenhum contrato de domínio muda.
 
+> **Implementation note (2026-09-29):** o Context Builder de E2 foi implementado —
+> [`KNOWLEDGE_CONTEXT_BUILDER_V0_1.md`](KNOWLEDGE_CONTEXT_BUILDER_V0_1.md). Retrieval, LLM, embeddings,
+> vector DB e eval continuam não implementados.
+
 ## Purpose
 
 Responder, com o menor sistema possível:
