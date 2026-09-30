@@ -38,11 +38,12 @@ ver `docs/context/HUMAN_DECISIONS.md`, e só faz sentido depois de ver a primeir
 
 | Métrica | Definição |
 |---|---|
-| Matched | contagem de `CallDealMatch(status='matched')` |
-| Ambiguous | contagem de calls com múltiplas linhas `status='ambiguous'` |
-| Unmatched | contagem de `status='unmatched'` |
-| Manual review | contagem de `status='manual_review'` |
-| Rejected | contagem de `status='rejected'` (revisão humana descartou) |
+| Matched | calls cujo match **atual** (`resolve_current_match`) é `matched` — nunca contagem de linhas `CallDealMatch(status='matched')` |
+| Ambiguous | calls cujo match atual é `ambiguous` |
+| Unmatched | calls cujo match atual é `unmatched` |
+| Manual review | calls cujo match atual é `manual_review` |
+| Rejected | calls cujo match atual é `rejected` (revisão humana descartou) |
+| No decision / conflict | calls sem `MatchDecision` / com histórico não linear |
 
 ## Como usar
 

@@ -1,6 +1,7 @@
 # data/
 
-Este repositório é **público**. Nenhum dado real de cliente entra aqui — nunca.
+Trate este repositório como público, independentemente da visibilidade atual. Nenhum dado real de
+cliente entra aqui — nunca ([ADR-004](../docs/decisions/ADR_004-real-data-privacy-boundary.md)).
 
 Proibido versionar: transcrições, exports de CRM, nomes/telefone/e-mail de lead, gravações,
 tokens, API keys, IDs identificáveis, ou output de LLM que contenha informação identificável.

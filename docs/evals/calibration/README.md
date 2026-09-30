@@ -1,5 +1,7 @@
 # Synthetic Annotation Calibration Kit v0
 
+> **Status: HISTORICAL — superseded by [kit v0.1](README_V0_1.md).** Mantido como registro; não usar para anotar/planejar.
+
 ## Purpose
 
 Treinar o anotador A, o anotador B e o adjudicador no

@@ -1,5 +1,8 @@
 # Notion Sync Handoff
 
+> **Status: HISTORICAL — handoff de 2026-09-18 (PR #1–#6).** Números e status abaixo não refletem
+> o estado atual; ver [`CURRENT_STATE.md`](CURRENT_STATE.md).
+
 Handoff operacional para atualizar o Project Hub no Notion manualmente — esta sessão não tem
 acesso ao Notion e não o edita diretamente. Mapeamento feito a partir dos números de task
 citados pelo usuário; não há referência a esses números dentro do repositório (nenhum arquivo

@@ -54,7 +54,7 @@ ai-closer-private/
 ```
 
 `curated/canonical/` and `curated/matching/` are documented as **reserved, not created** — no
-code produces that output yet (same reasoning as `src/closer_ai/analytics/` staying an empty
+code produces that output yet (same reasoning that later removed the empty `src/closer_ai/analytics/`
 package: don't create a destination before something writes to it).
 
 `<dataset_id>` is the manifest's own `dataset_id` field reused directly as the folder name

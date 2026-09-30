@@ -7,30 +7,38 @@ banco, storage e provedor de LLM entram por ADR quando houver caso de uso concre
 
 ```
 transcrição bruta (fora do repo)
-  → normalization/   (schema canônico de call)
-  → ai/               (extração estruturada: eventos, objeções, sinais)
-  → integrations/     (CRM: leitura de deals)
-  → domain/           (matching call ↔ deal, modelo de Deal/Outcome)
-  → analytics/        (outcome intelligence, agregados)
-  → experiments/       (experimentation engine — fase futura)
+  → ingestion/ + normalization/   (fonte → schema canônico de Call)
+  → ai/                           (evidência estruturada: ObjectionEvent v0; classifier experimental E0/E1/E2)
+  → domain/                       (Deal Identity, candidatos + MatchDecision, Outcome canônico)
+  → Outcome Intelligence          (futuro — sem módulo ainda)
+  → experimentos de playbook      (futuro)
 ```
 
-`storage/` e `api/` existem como pastas para quando houver decisão de persistência e
-exposição real — hoje estão vazias por design.
+Decisões duráveis estão nas ADRs ([`docs/decisions/`](../decisions/README.md)).
 
 ## Módulos (`src/closer_ai/`)
 
-| Módulo | Responsabilidade |
-|---|---|
-| `domain/` | Entidades centrais (Deal, Call, Outcome) e regras de negócio — ver `DATA_MODEL.md` |
-| `ingestion/` | Entrada de transcrições/dados brutos (fonte a definir) |
-| `normalization/` | Transcrição bruta → schema canônico |
-| `ai/` | Extração estruturada via LLM (objeções, momentos, sinais) |
-| `analytics/` | Agregação e outcome intelligence |
-| `experiments/` | Experimentation engine (fase futura) |
-| `integrations/` | Conectores externos (CRM, etc.) |
-| `storage/` | Persistência (sem decisão de banco ainda) |
-| `api/` | Exposição externa (sem API pública ainda) |
+| Módulo | Responsabilidade | Estado |
+|---|---|---|
+| `normalization/` | Canonical Call (`Call`, `Participant`, `TranscriptSegment`), ids determinísticos | implementado |
+| `ingestion/` | Fronteira de fonte (Agro/Zoom, hipótese de formato) + profiler | implementado, só dado sintético |
+| `domain/` | Lead, Deal, StageEvent, Deal Identity (ADR-002), CallDealMatch + MatchDecision (ADR-003), Outcome (ADR-001), ObjectionEvent, composição Call → Deal → Outcome | implementado (contratos) |
+| `ai/` | Extractor rule-based; Knowledge Context Builder; classifier E0/E1/E2 + `ClassificationProvider` (ADR-005); Ollama provider local; Experiment Runner | implementado; classifier é eval layer experimental |
+
+Pacotes para analytics, experiments, integrations, storage e API **não existem**: os diretórios
+vazios foram removidos em 2026-09-29 (YAGNI). Serão criados quando houver código e decisão
+(storage/API entram por ADR).
+
+## Fronteira experimental de AI
+
+```
+Sales Knowledge Base → Knowledge Context Builder ─┐
+Canonical Call → prompt E0 / E1 / E2 ◄────────────┘ → ClassificationProvider → Ollama (loopback)
+  → ClassificationRun → Experiment Runner (compliance + proveniência, artifacts privacy-first)
+```
+
+E2 = full-context knowledge augmentation; E3 (seleção) e E4 (semântico), embeddings e vector DB são
+deferred. Predições do classifier não são entidades de domínio nem gold.
 
 ## Integrações previstas
 

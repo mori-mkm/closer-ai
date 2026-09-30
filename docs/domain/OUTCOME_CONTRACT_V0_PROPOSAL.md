@@ -4,6 +4,12 @@ Status: **PROPOSAL rev. 2 — não implementado.** Nenhum código muda com este 
 vigente continua sendo `Deal.outcome` (`src/closer_ai/domain/deal.py`,
 `docs/domain/DEAL_MODEL.md`).
 
+> **Current status (2026-09-29):** aceito como [ADR-001](../decisions/ADR_001-outcome-contract-v0.md);
+> o **núcleo estrutural** foi implementado depois (`src/closer_ai/domain/outcome.py`,
+> `commercial_state.py`), e `Deal.outcome` passou a ser só projeção legada do CRM. A **policy
+> comercial** (§7.3, §9.2–§9.4) continua não implementada (D-G1/D-G2/D-G5/D-G6). O parágrafo acima é
+> o status original desta proposta.
+
 Pergunta:
 
 > Qual é o menor contrato de Outcome capaz de representar o estado comercial de uma

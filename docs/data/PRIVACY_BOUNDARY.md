@@ -1,6 +1,7 @@
 # Privacy Boundary
 
-Auditoria prática do que pode/não pode entrar no Git público, e como transformar um caso real
+Auditoria prática do que pode/não pode entrar no Git (tratado como público, independentemente da
+visibilidade atual do repositório; decisão durável: [ADR-004](../decisions/ADR_004-real-data-privacy-boundary.md)), e como transformar um caso real
 em fixture sintética no futuro sem vazar PII. Não é interpretação jurídica — autorização/
 compliance é decisão humana (`docs/context/OPEN_QUESTIONS.md`, `docs/context/HUMAN_DECISIONS.md`),
 este documento só define a fronteira técnica.

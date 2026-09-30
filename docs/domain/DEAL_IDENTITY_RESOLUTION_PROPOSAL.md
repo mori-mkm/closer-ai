@@ -2,8 +2,9 @@
 
 Status: **PROPOSAL — contrato estrutural e política de fundação implementados**
 (`src/closer_ai/domain/deal_identity.py`). DI-M1 = 7a e DI-M2 = D decididos por Matheus.
-Política de fundação de Deals e integração com o matcher dependem de decisões de Matheus e Gabriel
-listadas no fim.
+Política de fundação e integração com o matcher também implementadas (§7.1, §6); perguntas DI-G1–DI-G4
+(Gabriel) seguem abertas. Decisão durável: [ADR-002](../decisions/ADR_002-canonical-deal-identity.md)
+(Proposed, aguardando DI-M3).
 
 Pergunta:
 

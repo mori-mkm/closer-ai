@@ -2,7 +2,8 @@
 
 Status: **IMPLEMENTED** — `src/closer_ai/ai/knowledge_context.py`, tests in
 `tests/unit/ai/test_knowledge_context.py`. Full-context knowledge assembly only: no retriever, no LLM,
-no embeddings, no vector DB, no classifier, no RAG eval yet.
+no embeddings, no vector DB, no RAG eval. (Used by the E2 arm of the
+[classifier](OBJECTION_CLASSIFIER_RUNNER_V0_1.md), which was implemented later.)
 
 ## Purpose
 

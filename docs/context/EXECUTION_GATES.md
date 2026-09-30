@@ -3,8 +3,14 @@
 Definition of Done objetiva por camada. Existe para impedir a armadilha de "feature pronta
 porque o código passa nos testes sintéticos" — cada gate abaixo exige evidência contra dado
 real ou processo real, não só cobertura de teste. Nenhum gate abaixo está fechado hoje
-(2026-09-18); ver `docs/context/CURRENT_STATE.md` para o que já está implementado no nível de
-código.
+(reconciliado em 2026-09-29); ver `docs/context/CURRENT_STATE.md` para o que já está implementado
+no nível de código.
+
+Regra transversal: nenhum gate pode ser cumprido contornando as camadas de autoridade já
+implementadas — relação Call → Deal só via `resolve_current_match`
+([ADR-003](../decisions/ADR_003-authoritative-call-deal-matching.md)), identidade card → Deal só via
+`DealIdentityDecision` ([ADR-002](../decisions/ADR_002-canonical-deal-identity.md)), outcome só via
+`OutcomeAssessment` atual, nunca `Deal.outcome` ([ADR-001](../decisions/ADR_001-outcome-contract-v0.md)).
 
 ## Data acceptance gates (onboarding sequence)
 
@@ -42,7 +48,9 @@ Runbook completo para chegar aqui: [`docs/data/REAL_CALL_VALIDATION_KIT.md`](../
       (`src/closer_ai/domain/lead.py`, `deal.py`)
 - [ ] Estágios (`Stage`) mapeados do pipeline real para o enum genérico atual
       (`created`/`qualification`/`proposal`/`negotiation`/`other`)
-- [ ] Semântica de outcome validada com o negócio (o que conta como `won`/`lost`, loss reasons)
+- [ ] Semântica de outcome validada com o negócio (D-G1/D-G2/D-G5/D-G6 — o que conta como
+      `won`/`rejected`, automação × pessoa, reversão) antes de escrever a policy do Outcome
+- [ ] Regra de identidade card → Deal validada (DI-G1–DI-G4): reabertura, card paralelo, automação
 - [ ] Nenhum PII em Git (export real fica fora do repositório, mesmo em fixtures)
 
 ## MATCHING READY
@@ -50,6 +58,8 @@ Runbook completo para chegar aqui: [`docs/data/REAL_CALL_VALIDATION_KIT.md`](../
 - [ ] Geração de candidatos rodando contra Deals/Calls reais
 - [ ] Ambiguidade preservada (múltiplas linhas `CallDealMatch(status='ambiguous')`, nunca um
       vencedor escolhido silenciosamente — já é invariante do schema, falta rodar contra dado real)
+- [ ] Relação atual gravada como `MatchDecision` (automática a partir do batch ou manual) e lida só
+      via `resolve_current_match`; storage com CAS atômico definido (TD-09)
 - [ ] Amostra de revisão humana definida (quantas linhas `manual_review`/`ambiguous` um humano
       revisa antes de confiar no matcher)
 - [ ] Qualidade do match medida (taxa de match/ambíguo/não-encontrado na amostra real)
@@ -82,9 +92,10 @@ Runbook completo para chegar aqui: [`docs/data/REAL_CALL_VALIDATION_KIT.md`](../
 
 ## OUTCOME INTELLIGENCE READY
 
-- [ ] Outcomes finalizados (deals fechados, não `open`/`unknown`, na amostra analisada)
-- [ ] Join Deal-level completo (`Deal` + `CallDealMatch(matched)` + `ObjectionEvent[]` das
-      calls associadas)
+- [ ] Outcomes canônicos disponíveis (`resolve_current_outcome` = available, sem revisão
+      pendente), com policy real aprovada — nunca `Deal.outcome` (projeção legada do CRM)
+- [ ] Join Deal-level completo (Deal + calls cujo match atual é `matched` via
+      `resolve_current_match` + eventos estruturados dessas calls)
 - [ ] Amostra suficiente de won/lost para qualquer conclusão estatística (tamanho mínimo a
       definir com Product/RevOps antes da análise, não depois)
 - [ ] Deals `open`/`stale` separados explicitamente dos fechados na análise — nunca misturados
@@ -111,3 +122,16 @@ automatizado:
 - [ ] Rollback/re-execução é seguro (rodar o batch de novo não duplica nem corrompe nada —
       decorre dos IDs determinísticos, mas confirmar antes)
 - [ ] Relatório de qualidade pronto para ser gerado ao final do batch (`docs/data/DATA_QUALITY_REPORT.md`)
+
+## CLASSIFIER ON REAL DATA (E0/E1/E2)
+
+O classifier experimental, o Ollama provider e o Experiment Runner existem e rodaram só com calls
+sintéticas. Antes de rodar em uma call real:
+
+- [ ] Autorização de uso do corpus confirmada (ADR-004, `docs/context/HUMAN_DECISIONS.md`)
+- [ ] Provider local (Ollama, loopback) ou, para cloud, decisão explícita de autorização/privacidade
+      registrada (ADR-005) — hoje não existe provider cloud
+- [ ] Knowledge Base sem alteração não commitada (`knowledge_git_sha`) e SHA registrado no experimento
+- [ ] Artifacts gravados só em caminho gitignored (`artifacts/`), privacy-first (sem transcript,
+      prompt, resposta crua ou summary)
+- [ ] Nenhuma alegação de qualidade (accuracy/melhor braço) sem gold real (pilot D3 / Golden Set v1)

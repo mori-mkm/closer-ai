@@ -1,5 +1,8 @@
 # Next 7 Days — Execution Plan
 
+> **Status: HISTORICAL — plano tático de 2026-09-18.** Estado atual e próximo passo:
+> [`CURRENT_STATE.md`](CURRENT_STATE.md), [`ROADMAP.md`](../product/ROADMAP.md).
+
 Gerado em 2026-09-18 a partir do estado real do repositório
 (`docs/context/CURRENT_STATE.md`). Não presume que dados reais chegarão amanhã — os itens de
 Track A são sobre destravar acesso, não sobre processar dado que ainda não existe localmente.

@@ -2,7 +2,7 @@
 
 Perguntas em aberto que afetam decisão técnica futura. Quando respondida, mover a resposta
 para o documento relevante (`CURRENT_STATE.md`, uma ADR, ou doc de domínio) e remover daqui.
-Reconciliado em 2026-09-18 — perguntas já respondidas pelo trabalho de PR #1-#6 foram
+Reconciliado em 2026-09-18 (conferido de novo em 2026-09-29) — perguntas já respondidas pelo trabalho de PR #1-#6 foram
 removidas (cardinalidade Call↔Deal, Stage vs. Outcome, forma dos IDs determinísticos).
 
 ## DATA ACCESS
@@ -70,7 +70,8 @@ removidas (cardinalidade Call↔Deal, Stage vs. Outcome, forma dos IDs determin�
 
 ## PRODUCT
 
-- Definição exata de "outcome" para fins de Outcome Intelligence: ganho/perdido é suficiente,
+- Definição exata de "outcome" para fins de Outcome Intelligence (o contrato canônico já existe —
+  ADR-001, status `won`/`rejected`/`open`/`unknown` —; em aberto: D-G1–D-G8 e métricas): ganho/perdido é suficiente,
   ou entram métricas intermediárias (ciclo, número de calls até fechar)? (Pergunta do
   bootstrap, ainda sem resposta confirmada — ver `docs/domain/SALES_MODEL.md`.)
 - Quais workflows de gestor (manager) o produto precisa suportar primeiro, uma vez que houver
@@ -84,6 +85,7 @@ removidas (cardinalidade Call↔Deal, Stage vs. Outcome, forma dos IDs determin�
 - Branch protection / required status checks no GitHub: configurado de fato? Não verificável
   localmente nesta sessão (sem `gh auth login`) — checar manualmente em Settings → Branches e
   atualizar `docs/context/CURRENT_STATE.md`.
-- Provedor de LLM: qual abstração mínima é necessária antes de escolher, e quando essa escolha
-  se torna urgente o bastante para virar ADR? (Ainda em aberto — nenhum extractor LLM-backed
-  existe; `RuleBasedObjectionExtractor` é 100% determinístico.)
+- Provedor de LLM **definitivo** / cloud: ainda em aberto. A abstração mínima já existe
+  (`ClassificationProvider`, [ADR-005](../decisions/ADR_005-classification-provider-boundary.md)) e o
+  único provider é Ollama local para experimento. Um provider cloud para dado real exige decisão de
+  autorização/privacidade (ADR-004).

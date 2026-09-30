@@ -1,5 +1,7 @@
 # Adjudication Template v0
 
+> **Status: HISTORICAL — superseded by [`ADJUDICATION_TEMPLATE_V0_1.md`](ADJUDICATION_TEMPLATE_V0_1.md).** Mantido como registro; não usar para anotar/planejar.
+
 Preencha depois de receber a call, a anotação A e a anotação B. O adjudicador **não** é A nem B e
 **não** consulta a referência antes de terminar. Não altere a guideline durante a adjudicação.
 
