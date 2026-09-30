@@ -7,6 +7,26 @@ prompt ou chamada de LLM é criado por este documento. Nenhum contrato de domín
 > [`KNOWLEDGE_CONTEXT_BUILDER_V0_1.md`](KNOWLEDGE_CONTEXT_BUILDER_V0_1.md). Retrieval, LLM, embeddings,
 > vector DB e eval continuam não implementados.
 
+## Current implementation status
+
+Adicionado na reconciliação de 2026-09-29. O restante do documento é a proposta original, mantida
+como registro; o status acima ("PROPOSAL — não implementado") descreve o momento em que foi escrita.
+
+| Item | Status | Onde |
+|---|---|---|
+| E0 — transcript only | IMPLEMENTED (braço experimental) | `src/closer_ai/ai/objection_classifier.py` |
+| E1 — + guia curto de taxonomia | IMPLEMENTED (braço experimental) | idem (`CLASSIFICATION_GUIDE`) |
+| E2 — + full-context knowledge (8 cards) | IMPLEMENTED (braço experimental) | idem + `knowledge_context.py` |
+| E3 — seleção determinística + vizinhos | DEFERRED | — |
+| E4 — semântico/híbrido | DEFERRED | — |
+| Retrieval semântico, embeddings, vector DB | NOT IMPLEMENTED | — |
+| Provider de LLM | Ollama local-only ([ADR-005](../decisions/ADR_005-classification-provider-boundary.md)) | `ollama_provider.py` |
+| Orquestração + proveniência dos runs | IMPLEMENTED (compliance operacional) | `experiment_runner.py` |
+| Eval harness contra gold (métricas desta proposta) | NOT IMPLEMENTED — não existe gold real (D3) | — |
+
+"RAG" nesta proposta inclui a fase full-context. O que existe hoje é **full-context knowledge
+augmentation (E2)**, não RAG semântico, e nada foi validado quanto a qualidade.
+
 ## Purpose
 
 Responder, com o menor sistema possível:

@@ -1,6 +1,8 @@
 # Objection Annotation Guideline v0
 
-Status: **DRAFT — pré-pilot.** Não usada em dado real ainda. D3, D6 e a taxonomia final continuam
+> **Status: HISTORICAL — superseded by [guideline v0.1](OBJECTION_ANNOTATION_GUIDELINE_V0_1.md).** Mantido como registro; não usar para anotar/planejar.
+
+Status original: **DRAFT — pré-pilot.** Não usada em dado real ainda. D3, D6 e a taxonomia final continuam
 abertas. Todos os exemplos são sintéticos.
 
 ## Purpose

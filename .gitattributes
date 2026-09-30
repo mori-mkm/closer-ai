@@ -1,0 +1,3 @@
+# Line-ending policy: text files are normalized to LF in the repository and checked out with LF
+# on every platform (Windows, Linux, CI, agents). Every blob was already LF when this was added.
+* text=auto eol=lf

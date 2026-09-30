@@ -17,7 +17,10 @@ data/processed/private/
 !tests/fixtures/**/*.csv
 !evals/datasets/**/*.csv
 
-# --- pre-existing local docs (business/partner docs, not for a public repo) ---
+# --- pre-existing local docs (business/partner docs, never committed) ---
+# Deliberately broad: it hides private local notes/proposals kept at the repo root. Side effect: a
+# NEW root-level .md/.html is ignored too — add an explicit `!name` exception below when one should
+# be versioned (e.g. README/AGENTS/CLAUDE). Project docs belong in docs/, which is not affected.
 /*.md
 /*.html
 !README.md

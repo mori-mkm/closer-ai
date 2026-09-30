@@ -1,5 +1,7 @@
 # Annotation Template v0
 
+> **Status: HISTORICAL — superseded by [`ANNOTATION_TEMPLATE_V0_1.md`](ANNOTATION_TEMPLATE_V0_1.md).** Mantido como registro; não usar para anotar/planejar.
+
 Copie este bloco uma vez por call. Preencha sozinho, sem ver outras anotações, a referência, o
 Outcome ou saídas de modelo. Use ids de segmento (`CALnn_Snnn`), nunca trechos de texto.
 

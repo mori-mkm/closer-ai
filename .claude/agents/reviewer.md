@@ -17,8 +17,9 @@ Task, contrato de domínio, implementação, testes, avaliação (eval) e o `git
 - Cumprimento do escopo da task (nada implementado fora do que foi pedido).
 - Separação de responsabilidades preservada (ex.: `ai/` não decidiu contrato sozinho;
   `domain/` não implementou pipeline de IA).
-- Arquitetura: nada em `normalization/`, `analytics/`, `api/`, `storage/`, `integrations/`,
-  `experiments/` foi tocado sem necessidade.
+- Arquitetura: nada em `normalization/` foi tocado sem necessidade, e nenhum pacote novo (ex.:
+  `analytics/`, `api/`, `storage/`, `integrations/`, `experiments/`) foi criado sem código real e,
+  quando durável, ADR.
 - Qualidade e cobertura de testes — não aprove só porque os testes passam; avalie se eles
   cobrem os edge cases reais do contrato.
 - Regressões: rode `pytest` e `ruff check .` você mesmo e confira o resultado, não confie só

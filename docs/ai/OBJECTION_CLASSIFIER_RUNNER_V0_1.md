@@ -2,8 +2,10 @@
 
 Status: **IMPLEMENTED** — `src/closer_ai/ai/objection_classifier.py`; tests in
 `tests/unit/ai/test_objection_classifier.py` and `tests/integration/test_objection_classifier_runner.py`.
-Provider **interface only**: no production LLM provider, no external call, no Golden Set evaluation, no
-E3 retrieval, no embeddings/vector DB. Domain contract unchanged (D7 open).
+Provider **interface only** in this component; the first real provider (local Ollama) and the Experiment
+Runner were added later ([Ollama](OLLAMA_CLASSIFICATION_PROVIDER_V0_1.md), [runner](EXPERIMENT_RUNNER_V0_1.md)).
+No cloud provider, no Golden Set evaluation, no E3 retrieval, no embeddings/vector DB. Domain contract
+unchanged (D7 open).
 
 ## Purpose
 
@@ -108,7 +110,7 @@ unchanged. Tests use `ScriptedClassificationProvider` (`tests/fixtures/classifie
 
 ## Explicitly deferred
 
-Real providers (OpenAI/Anthropic/Gemini/Ollama), model choice, secrets, retries/fallback, async; E3/E4
+Real providers (since then: Ollama local-only, [`OLLAMA_CLASSIFICATION_PROVIDER_V0_1.md`](OLLAMA_CLASSIFICATION_PROVIDER_V0_1.md); cloud providers still deferred), model choice, secrets, retries/fallback, async; E3/E4
 selection, embeddings, vector DB; Golden Set comparison and metrics; persistence of runs; dirty-tree
 rejection and Git SHA capture (orchestration); domain enum migration (D7).
 

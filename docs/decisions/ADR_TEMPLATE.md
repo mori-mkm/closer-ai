@@ -19,3 +19,8 @@ O que mais foi avaliado e por que foi descartado.
 ## Consequences
 
 O que essa decisão facilita e o que ela custa/trava.
+
+## Implementation status
+
+O que já existe no código (arquivos/testes), o que falta e o que depende de decisão humana.
+Atualizar esta seção quando a implementação mudar; não reescrever Context/Decision.

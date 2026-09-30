@@ -4,7 +4,8 @@
 
 Accepted
 
-Aceito como design. Implementação ainda não iniciada — ver "Implementation gate".
+Aceito como design antes da implementação (o texto original registrava "Implementação ainda não
+iniciada — ver Implementation gate"). O estado atual está em "Implementation status" no fim deste ADR.
 
 Contrato detalhado: [`OUTCOME_CONTRACT_V0_PROPOSAL.md`](../domain/OUTCOME_CONTRACT_V0_PROPOSAL.md)
 (rev. 2). Este ADR registra **por que** decidimos e **que consequências aceitamos**; o
@@ -190,3 +191,30 @@ Implementar somente após:
 ## Validation
 
 Nenhuma mudança de comportamento em runtime nesta branch; apenas documentação.
+
+## Implementation status
+
+Atualizado em 2026-09-29 na reconciliação de documentação. As seções acima (Context, Decision,
+Alternatives, Consequences, Implementation gate) são o registro original da decisão e não foram
+reescritas.
+
+- **Structural core — implemented:** as três entidades append-only, elegibilidade, cadeia linear com
+  CAS, autoridade humana e `resolve_current_outcome`.
+- **Commercial-state composition — implemented:** Call → match atual → Deal → outcome atual, sem
+  fallback para `Deal.outcome`.
+- **Real-data validation — not done:** nenhum dado real de CRM foi processado.
+- **Business/human policy decisions — open:** D-G1, D-G2, D-G5 e D-G6 (e D-G3/D-G4/D-G7/D-G8)
+  continuam abertas; a policy comercial real não existe no código.
+
+Evidência por parte:
+
+| Parte | Status | Evidência |
+|---|---|---|
+| `OutcomeEvidence`, `EvidenceDisposition`, `OutcomeAssessment`, ids determinísticos, elegibilidade, cadeia linear com CAS, autoridade humana, `resolve_current_outcome` | IMPLEMENTED (núcleo estrutural, PR #19) | `src/closer_ai/domain/outcome.py`, `tests/unit/domain/test_outcome.py` |
+| Call → match atual → Deal → outcome atual (sem fallback para `Deal.outcome`) | IMPLEMENTED (PR #20) | `src/closer_ai/domain/commercial_state.py`, `tests/unit/domain/test_commercial_state.py` |
+| DEP-2 (identidade card ↔ Deal) | IMPLEMENTED como contrato estrutural (PR #21–#23) | [ADR-002](ADR_002-canonical-deal-identity.md) |
+| Policy comercial real (sinais → status; proposal §7.3, §9.2–§9.4) | **NOT IMPLEMENTED** — segue bloqueada por D-G1, D-G2, D-G5, D-G6 | `outcome.py` docstring: assessments são construídos por um caller e só validados |
+| Atomicidade real do CAS (storage) | **NOT IMPLEMENTED** — TD-09 | nenhuma camada de storage existe |
+| Validação com dado real de CRM | **NOT DONE** | nenhum dado real processado |
+
+ADR Accepted ≠ policy real validada ≠ produção validada.

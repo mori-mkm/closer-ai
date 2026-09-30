@@ -1,7 +1,9 @@
 # Integrations (inventário, sem implementação)
 
-Lista de sistemas externos relevantes ao domínio, para orientar `src/closer_ai/integrations/`
-quando a implementação real começar. Nenhuma integração está implementada nesta fase.
+Lista de sistemas externos relevantes ao domínio, para orientar um futuro pacote de integrações
+quando a implementação real começar. Nenhuma integração com CRM, mensageria ou transcrição está
+implementada. A única integração externa existente é o LLM local via Ollama, atrás de
+`ClassificationProvider` ([ADR-005](../decisions/ADR_005-classification-provider-boundary.md)).
 
 ## CRM
 

@@ -1,5 +1,7 @@
 # Calibration Reference Answers v0
 
+> **Status: HISTORICAL — superseded by [`REFERENCE_ANSWERS_V0_1.md`](REFERENCE_ANSWERS_V0_1.md).** Mantido como registro; não usar para anotar/planejar.
+
 **CALIBRATION REFERENCE — não é gold nem ground truth.** Serve para discutir o processo depois que
 A, B e o adjudicador terminaram. **Não leia antes de submeter sua anotação ou adjudicação.**
 

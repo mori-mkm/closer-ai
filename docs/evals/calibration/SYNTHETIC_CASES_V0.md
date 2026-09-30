@@ -1,5 +1,7 @@
 # Synthetic Calibration Cases v0
 
+> **Status: HISTORICAL — superseded by [`SYNTHETIC_CASES_V0_1.md`](SYNTHETIC_CASES_V0_1.md).** Mantido como registro; não usar para anotar/planejar.
+
 **Sintético.** Nenhum trecho vem de call real; nenhuma pessoa, empresa, Deal ou contato real.
 Speakers: `CLOSER`, `LEAD` (papel de lead na Call) e `OTHER` (outro participante, papel `other`).
 Os ids `CALnn_Snnn` são ids de treino no lugar dos `segment_id` reais (que são hashes).

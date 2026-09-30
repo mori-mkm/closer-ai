@@ -1,7 +1,8 @@
 # Current Match Resolver (DEP-1)
 
 Implementação: `src/closer_ai/domain/matching.py` (seção "Current authoritative match").
-Testes: `tests/unit/domain/test_match_resolver.py`. Formato ADR (contrato entre módulos).
+Testes: `tests/unit/domain/test_match_resolver.py`. Decisão durável (porquê):
+[ADR-003](../decisions/ADR_003-authoritative-call-deal-matching.md); este documento é o contrato detalhado (como).
 
 ## Context
 
