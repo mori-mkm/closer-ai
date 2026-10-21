@@ -1,0 +1,74 @@
+{
+  "id": "guidance.COMPETITION_EXISTING_SOLUTION",
+  "category": "COMPETITION_EXISTING_SOLUTION",
+  "version": "1.0",
+  "source_section": "3.6 COMPETITION_EXISTING_SOLUTION",
+  "typical_phrases": [
+    "Já tenho um consultor/programa.",
+    "Já pago outra mentoria.",
+    "Estou comparando com outro.",
+    "O outro é mais barato.",
+    "Já aparecemos no evento, de graça.",
+    "Já patrocinamos."
+  ],
+  "recommended_moves": [
+    {
+      "id": "COMPETITION_EXISTING_SOLUTION.M1",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"O que o seu atual faz bem, e o que ainda falta?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "COMPETITION_EXISTING_SOLUTION.M2",
+      "code": "REFRAME",
+      "guidance": "Nomear 2 ou 3 diferenças nos critérios dele: \"Pelo que você descreveu, três coisas pesam: A, B e C.\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "COMPETITION_EXISTING_SOLUTION.M3",
+      "code": "CLARIFY",
+      "guidance": "\"Pra decidir entre os dois, qual critério é decisivo?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "COMPETITION_EXISTING_SOLUTION.M4",
+      "code": "ADDRESS_EXPLAIN",
+      "guidance": "Recomendação com justificativa (passo \"O\" do JOLT; o artigo não foi lido).",
+      "evidence_grade": "NOT_SUPPORTED_BY_CURRENT_SOURCES",
+      "grade_note": "NOT SUPPORTED BY CURRENT SOURCES",
+      "source_ids": []
+    },
+    {
+      "id": "COMPETITION_EXISTING_SOLUTION.M5",
+      "code": "CONFIRM_UNDERSTANDING",
+      "guidance": "\"Esse critério é o que decide pra você?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "COMPETITION_EXISTING_SOLUTION.D1",
+      "guidance": "Criticar o concorrente.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (prática)",
+      "source_ids": []
+    },
+    {
+      "id": "COMPETITION_EXISTING_SOLUTION.D2",
+      "guidance": "Mandar folder ou lista de cases.",
+      "evidence_grade": "WEAK",
+      "grade_note": "sem grau explícito na pesquisa; prior WEAK dos playbooks",
+      "source_ids": []
+    }
+  ],
+  "evidence_source_ids": ["N12", "N26"],
+  "notes": "Concorrente citado cedo, \"49% melhor\" (N12, WEAK, base não declarada); ambush de não patrocinador aparece na memória induzida (N26, MODERATE, sem percentual). Nenhum win rate por movimento. Inferência da pesquisa: \"já aparecemos no evento\" é ambush de concorrente."
+}

@@ -1,0 +1,9 @@
+# Synthetic call (invented for the demo; no real person or company).
+closer: Então, Marta, o programa completo fica em doze parcelas de dois mil reais.
+lead: Nossa. Está caro pra mim, viu.
+closer: Entendo.
+lead: Não tenho esse orçamento agora, o caixa da loja está bem apertado este semestre.
+closer: E se a gente olhasse o que esse problema de estoque está te custando hoje?
+lead: Pode ser, mas do jeito que está não consigo assumir esse valor.
+closer: Tudo bem. Posso te mandar uma simulação até quinta-feira?
+lead: Pode mandar, eu olho com calma.

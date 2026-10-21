@@ -1,0 +1,11 @@
+# Synthetic call (invented for the demo; no real person or company).
+closer: Bom dia, Renato. Pelo que você contou, o gargalo hoje é a equipe comercial sem processo, certo?
+lead: Isso. A gente perde muita venda porque cada vendedor faz de um jeito.
+closer: A mentoria tem doze semanas e começa justamente pelo processo de vendas da equipe.
+lead: Gostei bastante da proposta, faz sentido pra gente.
+closer: Que bom. Podemos fechar a sua vaga hoje?
+lead: Olha, aqui eu não fecho nada sem o meu sócio aprovar. Ele cuida do financeiro e sem o OK dele não sai.
+closer: Entendo. O que você acha que ele vai perguntar?
+lead: Ele sempre quer saber em quanto tempo volta o investimento.
+closer: Combinado. Como fica o próximo passo?
+lead: Vou conversar com o meu sócio e te dou um retorno.

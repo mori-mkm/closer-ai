@@ -1,0 +1,67 @@
+{
+  "id": "guidance.TERMS_PROCESS",
+  "category": "TERMS_PROCESS",
+  "version": "1.0",
+  "source_section": "3.8 TERMS_PROCESS",
+  "typical_phrases": [
+    "Me manda a proposta primeiro.",
+    "Me manda por escrito e eu vejo.",
+    "Dá pra parcelar?",
+    "Consigo pagar em 12x?",
+    "Preciso ver o contrato antes.",
+    "Tem desconto se eu fechar hoje?"
+  ],
+  "recommended_moves": [
+    {
+      "id": "TERMS_PROCESS.M1",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"O que a proposta precisa responder pra você decidir?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "TERMS_PROCESS.M2",
+      "code": "PROVIDE_EVIDENCE",
+      "guidance": "Proposta focada na dúvida dele, com a data de decisão. Não mandar pacote genérico.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (JOLT: material genérico sobrecarrega)",
+      "source_ids": []
+    },
+    {
+      "id": "TERMS_PROCESS.M3",
+      "code": "CLARIFY",
+      "guidance": "Separar preço de caixa: \"Qual restrição de caixa você tem nesse período?\"",
+      "evidence_grade": "NOT_SUPPORTED_BY_CURRENT_SOURCES",
+      "grade_note": "NOT SUPPORTED BY CURRENT SOURCES (Inf)",
+      "source_ids": []
+    },
+    {
+      "id": "TERMS_PROCESS.M4",
+      "code": "NEGOTIATE_OFFER_ALTERNATIVE",
+      "guidance": "Forma de pagamento só depois de valor confirmado.",
+      "evidence_grade": "NOT_SUPPORTED_BY_CURRENT_SOURCES",
+      "grade_note": "NOT SUPPORTED BY CURRENT SOURCES",
+      "source_ids": []
+    },
+    {
+      "id": "TERMS_PROCESS.M5",
+      "code": "DEFER_FOLLOW_UP",
+      "guidance": "\"Quem revisa o contrato e até quando?\" Enviar cedo.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (prática)",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "TERMS_PROCESS.D1",
+      "guidance": "Dar desconto no primeiro pedido para fechar.",
+      "evidence_grade": "NOT_SUPPORTED_BY_CURRENT_SOURCES",
+      "grade_note": "NOT SUPPORTED BY CURRENT SOURCES; N28 mostra a conta do trade-off, não o efeito do desconto",
+      "source_ids": []
+    }
+  ],
+  "evidence_source_ids": ["N14", "N28"],
+  "notes": "Próximos passos com data na 1ª reunião associados a deals mais rápidos (N14, WEAK); N28 é a aritmética do desconto, não um efeito medido (WEAK)."
+}

@@ -1,0 +1,88 @@
+{
+  "id": "guidance.PRICE_BUDGET",
+  "category": "PRICE_BUDGET",
+  "version": "1.0",
+  "source_section": "3.1 PRICE_BUDGET",
+  "typical_phrases": [
+    "Está caro pra mim.",
+    "Não tenho orçamento agora.",
+    "Tá apertado, o caixa tá curto.",
+    "Não é sobre o valor, é sobre o retorno.",
+    "Não sei se o retorno compensa."
+  ],
+  "recommended_moves": [
+    {
+      "id": "PRICE_BUDGET.M1",
+      "code": null,
+      "guidance": "Pausa: silêncio de 2–3 s antes de responder; não completar o silêncio.",
+      "evidence_grade": "MODERATE",
+      "grade_note": "MODERATE (direção, N5); pausa não tem código v0.1",
+      "source_ids": ["N5"]
+    },
+    {
+      "id": "PRICE_BUDGET.M2",
+      "code": "CLARIFY",
+      "guidance": "\"Caro em relação a quê: ao que você imaginava, ao retorno que espera ou à outra opção?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "PRICE_BUDGET.M3",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"Hoje, quanto custa não resolver isso por mais seis meses?\" Usar os números dele.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "PRICE_BUDGET.M4",
+      "code": "CLARIFY",
+      "guidance": "Isolar: \"Se o investimento fizesse sentido no seu caso, tem mais alguma coisa te travando?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "PRICE_BUDGET.M5",
+      "code": "REFRAME",
+      "guidance": "Reduzir risco, sem prometer ROI: \"Combinamos uma revisão em 30 dias; se não estiver funcionando, a gente para.\" Só se a operação oferece isso de fato.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "PRICE_BUDGET.M6",
+      "code": "CONFIRM_UNDERSTANDING",
+      "guidance": "\"Faz sentido pra você?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "PRICE_BUDGET.D1",
+      "guidance": "Dar desconto no primeiro \"caro\".",
+      "evidence_grade": "NOT_SUPPORTED_BY_CURRENT_SOURCES",
+      "grade_note": "NOT SUPPORTED BY CURRENT SOURCES",
+      "source_ids": []
+    },
+    {
+      "id": "PRICE_BUDGET.D2",
+      "guidance": "Prometer ROI ou garantia que a operação não entrega.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (N10)",
+      "source_ids": ["N10"]
+    },
+    {
+      "id": "PRICE_BUDGET.D3",
+      "guidance": "Preencher o silêncio depois da objeção.",
+      "evidence_grade": "WEAK",
+      "grade_note": "sem grau explícito na pesquisa; prior WEAK dos playbooks",
+      "source_ids": []
+    }
+  ],
+  "evidence_source_ids": ["N1", "N2"],
+  "notes": "N1 e N2 associam levantar preço e orçamento cedo a mais ganhos (associação, não efeito; amostra filtrada por 3 ou mais calls). Grau do playbook: WEAK. Nenhum movimento tem taxa de sucesso medida. Inferência da pesquisa: \"não é sobre o valor, é sobre o retorno\" pede a conta de retorno do próprio comprador, não uma conta nossa. Decisão aberta #3: essa frase pode ser NEED_VALUE_FIT."
+}

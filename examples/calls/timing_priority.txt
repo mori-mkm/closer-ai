@@ -1,0 +1,9 @@
+# Synthetic call (invented for the demo; no real person or company).
+closer: Seu João, pelo que vimos, a gestão de custos da fazenda é a prioridade número um, certo?
+lead: É, isso é importante sim.
+closer: Então podemos começar o acompanhamento já no mês que vem?
+lead: Agora não dá. Estamos no meio da safra e eu não tenho cabeça pra começar nada novo até a colheita acabar.
+closer: Faz sentido. Quando termina a colheita?
+lead: Lá pelo fim de março a gente está mais livre.
+closer: Então posso te ligar na primeira semana de abril para retomarmos?
+lead: Pode, na primeira semana de abril a gente conversa.

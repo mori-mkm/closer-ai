@@ -1,0 +1,72 @@
+{
+  "id": "guidance.AUTHORITY_INTERNAL_BUY_IN",
+  "category": "AUTHORITY_INTERNAL_BUY_IN",
+  "version": "1.0",
+  "source_section": "3.4 AUTHORITY_INTERNAL_BUY_IN",
+  "typical_phrases": [
+    "Vou ver com minha esposa/meu marido.",
+    "Preciso falar com meu sócio.",
+    "Não decido sozinho.",
+    "Vou levar pro conselho e te falo."
+  ],
+  "recommended_moves": [
+    {
+      "id": "AUTHORITY_INTERNAL_BUY_IN.M1",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"Quem mais participa dessa decisão, e o que cada um precisa ver pra dizer sim?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "AUTHORITY_INTERNAL_BUY_IN.M2",
+      "code": "CLARIFY",
+      "guidance": "\"Qual é a dúvida dele: preço, tempo ou risco?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "AUTHORITY_INTERNAL_BUY_IN.M3",
+      "code": "PROVIDE_EVIDENCE",
+      "guidance": "Resumo de uma página, nas palavras do comprador, com o risco endereçado, para ele levar.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (N25, direção)",
+      "source_ids": ["N25"]
+    },
+    {
+      "id": "AUTHORITY_INTERNAL_BUY_IN.M4",
+      "code": "DEFER_FOLLOW_UP",
+      "guidance": "Reunião com o decisor, com data: \"Consegue marcar 20 minutos com ele até [dia]?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (Inf): inferência da pesquisa, sem fonte",
+      "source_ids": []
+    },
+    {
+      "id": "AUTHORITY_INTERNAL_BUY_IN.M5",
+      "code": "CONFIRM_UNDERSTANDING",
+      "guidance": "\"Você consegue levar isso pra ele até [dia]?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "AUTHORITY_INTERNAL_BUY_IN.D1",
+      "guidance": "Refazer o pitch para quem não está na call.",
+      "evidence_grade": "WEAK",
+      "grade_note": "sem grau explícito na pesquisa; prior WEAK dos playbooks",
+      "source_ids": []
+    },
+    {
+      "id": "AUTHORITY_INTERNAL_BUY_IN.D2",
+      "guidance": "Pedir um sim imediato.",
+      "evidence_grade": "WEAK",
+      "grade_note": "sem grau explícito na pesquisa; prior WEAK dos playbooks",
+      "source_ids": []
+    }
+  ],
+  "evidence_source_ids": ["N13", "N25"],
+  "notes": "Decisor ausente associado a menor fechamento (N13, WEAK; forma ambígua). 74% das equipes de compra B2B em conflito (N25, MODERATE; lido por trecho). Cônjuge e sócio em compra de dono: NOT SUPPORTED BY CURRENT SOURCES. Inferência da pesquisa: em decisão de casal, o obstáculo pode ser financeiro-pessoal."
+}

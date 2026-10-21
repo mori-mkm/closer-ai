@@ -1,0 +1,87 @@
+{
+  "id": "guidance.TRUST_RISK",
+  "category": "TRUST_RISK",
+  "version": "1.0",
+  "source_section": "3.5 TRUST_RISK",
+  "typical_phrases": [
+    "Quem é você?",
+    "Já tentei isso e não deu certo.",
+    "Isso é promessa, não resultado.",
+    "Quero ver alguém do meu setor.",
+    "Não acredito em consultoria de resultado."
+  ],
+  "recommended_moves": [
+    {
+      "id": "TRUST_RISK.M1",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"O que deu errado da última vez?\" Não defender.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "TRUST_RISK.M2",
+      "code": "ACKNOWLEDGE_VALIDATE",
+      "guidance": "Labeling: \"Parece que isso já te queimou e você não quer repetir.\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "MODERATE (mecanismo, N17); WEAK (venda)",
+      "source_ids": ["N17"]
+    },
+    {
+      "id": "TRUST_RISK.M3",
+      "code": "ADDRESS_EXPLAIN",
+      "guidance": "Risco visível e limitado: \"Os primeiros 30 dias têm uma revisão; se não funcionar, a gente para.\" Só se a operação oferece isso de fato.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "TRUST_RISK.M4",
+      "code": "PROVIDE_EVIDENCE",
+      "guidance": "Prova do segmento dele, com número. Parar quando já ouviu o bastante.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "TRUST_RISK.M5",
+      "code": "CONFIRM_UNDERSTANDING",
+      "guidance": "\"Faz sentido seguir com esse combinado?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "TRUST_RISK.D1",
+      "guidance": "Discutir a experiência ruim.",
+      "evidence_grade": "WEAK",
+      "grade_note": "sem grau explícito na pesquisa; prior WEAK dos playbooks",
+      "source_ids": []
+    },
+    {
+      "id": "TRUST_RISK.D2",
+      "guidance": "Mandar mais cases depois que ele já ouviu o bastante.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (JOLT)",
+      "source_ids": []
+    },
+    {
+      "id": "TRUST_RISK.D3",
+      "guidance": "Prometer resultado que não pode mostrar.",
+      "evidence_grade": "WEAK",
+      "grade_note": "sem grau explícito na pesquisa; prior WEAK dos playbooks",
+      "source_ids": []
+    },
+    {
+      "id": "TRUST_RISK.D4",
+      "guidance": "Usar feel-felt-found roteirizado.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (críticas práticas sem dado, seção 4)",
+      "source_ids": []
+    }
+  ],
+  "evidence_source_ids": ["N16", "N17"],
+  "notes": "Mimetismo melhora resultados e confiança em laboratório (N16, MODERATE); nomear emoção reduz reação em laboratório (N17, MODERATE, mecanismo). Reduzir risco percebido aparece como foco de quem vence (RAIN, direção, sem número). Nada disso foi testado em call de venda."
+}

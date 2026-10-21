@@ -7,8 +7,8 @@ Reconciliar o documento inteiro; não empilhar correções no fim._
 
 - Data do snapshot: 2026-09-29 (reconciliação de arquitetura/documentação)
 - Code baseline reviewed: `50c13e9` (merge do PR #36, Experiment Runner)
-- Tests: **592 passed** (`pytest -q`): normalization 44, ingestion 78, domain 275, ai 185,
-  integration 10. Todos herméticos: nenhum teste exige Ollama, rede ou dado real
+- Tests: **696 passed** (`pytest -q`) após Objection Guidance Engine v0/v0.1 (+104 sobre 592:
+  guidance, grounding, post-call, CLI/pilot runner). Todos herméticos: nenhum teste exige Ollama, rede ou dado real
 - Lint: `ruff check .` limpo
 - CI: `.github/workflows/ci.yml` (import sanity check, `ruff check .`, `pytest -q`) em toda PR e
   push para `main`
@@ -61,6 +61,7 @@ Canonical Call ─► prompt E0 / E1 / E2 ◄───────────�
 | Knowledge Context Builder v0.1 | `src/closer_ai/ai/knowledge_context.py`; [doc](../ai/KNOWLEDGE_CONTEXT_BUILDER_V0_1.md) | full-context (8 cards), sem retrieval; RAG-O4 aberta |
 | Objection Classifier core + braços E0/E1/E2 | `src/closer_ai/ai/objection_classifier.py`; [doc](../ai/OBJECTION_CLASSIFIER_RUNNER_V0_1.md) | eval layer; predições ≠ `ObjectionEpisode` ≠ gold; labels CIT-O1, não enum do domínio |
 | Ollama Classification Provider v0.1 (local-only) | `src/closer_ai/ai/ollama_provider.py`; [doc](../ai/OLLAMA_CLASSIFICATION_PROVIDER_V0_1.md); [ADR-005](../decisions/ADR_005-classification-provider-boundary.md) | loopback only; sem retry/reparo; nenhum provider cloud |
+| Objection Guidance Engine v0 + Post-call Intelligence v0 (Value Sprint) | `src/closer_ai/ai/{objection_guidance,post_call}.py`, `src/closer_ai/demo/analyze_call.py`, `docs/knowledge/sales/guidance/`; [doc](../ai/OBJECTION_GUIDANCE_ENGINE_V0.md) | vertical slice sintético; retrieval = lookup por categoria; grounding lexical fail-closed; pilot runner + truncation guard + pilot summary prontos ([pilot](../product/REAL_CALL_PILOT.md)), bloqueado por autorização; graus da pesquisa preservados (nenhum movimento com taxa medida); **sem avaliação de qualidade** |
 | Experiment Runner v0.1 | `src/closer_ai/ai/experiment_runner.py`; [doc](../ai/EXPERIMENT_RUNNER_V0_1.md) | compliance operacional + proveniência; **sem métricas de qualidade**; artifacts privacy-first em `artifacts/` (gitignored) |
 | Privacy boundary + OCI shared storage foundation | [ADR-004](../decisions/ADR_004-real-data-privacy-boundary.md); `docs/data/` | OCI provisionado e smoke-tested **só com dado sintético**; nenhum dado real enviado |
 | Agent harness + CI | `.claude/agents/`, `docs/agents/`, `.github/workflows/ci.yml` | — |
