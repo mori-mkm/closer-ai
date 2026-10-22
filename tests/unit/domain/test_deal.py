@@ -224,7 +224,7 @@ def test_stage_event_id_stable_across_equivalent_utc_offsets():
 
 def test_stage_event_rejects_naive_occurred_at():
     with pytest.raises(ValidationError):
-        _stage_event(occurred_at=datetime(2026, 1, 10, 12, 0))  # noqa: DTZ001 - naive on purpose
+        _stage_event(occurred_at=datetime(2026, 1, 10, 12, 0))  # noqa: DTZ001 - naive datetime is the behavior under test
 
 
 def test_stage_event_out_of_order_delivery_is_representable():

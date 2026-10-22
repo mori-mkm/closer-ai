@@ -333,7 +333,7 @@ def test_parse_agro_call_closer_none_does_not_flag_metadata_incomplete_on_its_ow
 def test_parse_agro_call_naive_occurred_at_raises_agro_parse_error():
     from datetime import datetime
 
-    raw = agro_raw_call(occurred_at=datetime(2026, 2, 3, 13, 0))  # noqa: DTZ001 - naive on purpose
+    raw = agro_raw_call(occurred_at=datetime(2026, 2, 3, 13, 0))  # noqa: DTZ001 - naive datetime is the behavior under test
     with pytest.raises(AgroParseError):
         parse_agro_call(raw, company_id=COMPANY_ID)
 

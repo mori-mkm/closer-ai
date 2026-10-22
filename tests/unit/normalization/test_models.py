@@ -126,7 +126,7 @@ def test_call_negative_duration_rejected():
 
 def test_call_naive_occurred_at_rejected():
     with pytest.raises(ValidationError, match="timezone-aware"):
-        _call(occurred_at=datetime(2026, 1, 15, 14, 0))  # noqa: DTZ001 — naive datetime is the case under test
+        _call(occurred_at=datetime(2026, 1, 15, 14, 0))  # noqa: DTZ001 - naive datetime is the behavior under test
 
 
 # --- Call: empty collections ---
