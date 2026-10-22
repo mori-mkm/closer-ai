@@ -90,7 +90,8 @@ class CaptionTracker {
     const norm = _words(text).join(" ");
     if (!norm || (!grows && this.lastBySpeaker.get(b.speaker) === norm)) return;
     this.lastBySpeaker.set(b.speaker, norm);
-    out.push({ meeting_id: this.meetingId, speaker: b.speaker, text, timestamp: now, sequence: ++this.sequence });
+    out.push({ meeting_id: this.meetingId, speaker: b.speaker, text, timestamp: now, sequence: ++this.sequence,
+      changed_at: b.changedAt }); // changed_at: last caption change, for the runtime's latency breakdown
   }
 
   /** Feed the current blocks; returns the utterances completed by this tick, in order. */

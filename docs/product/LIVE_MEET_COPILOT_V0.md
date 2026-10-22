@@ -49,7 +49,7 @@ Meet captions (DOM) ── MeetCaptionAdapter ── CaptionTracker ── conte
                                                                                   │
 LiveSalesSession: utterances → rolling window → trigger → classify_call (E1) → live emission policy
                   → guide_episode (exact-category knowledge + grounding, fail closed) → one recommendation
-                                                                                  │ GET /recommendation (1 s poll)  
+                                                                                  │ GET /recommendation (0.5 s poll)
                                                                                   ▼
                                      sidebar on the Meet tab (shadow DOM): transcript + recommendation
 ```
@@ -65,7 +65,7 @@ What is new: `src/closer_ai/live/` (session + server) and `extensions/google-mee
 |---|---|---|
 | MeetCaptionAdapter | `extensions/google-meet/meet_adapter.js` | The only code that knows Meet's DOM. Selectors live in `SELECTORS`, with structural fallbacks. A speaker it cannot read is `unknown`. |
 | CaptionTracker | same file (pure, no DOM) | Emits a caption block once it has been stable for 1.5 s, or when it disappears. Only new words when a block keeps growing. Never emits the same text twice. Sequence is monotonic. |
-| content.js | `extensions/google-meet/content.js` | Wiring: scans captions every 0.5 s, polls the runtime every 1 s, draws the sidebar. Nothing is stored in the browser. |
+| content.js | `extensions/google-meet/content.js` | Wiring: scans captions every 0.5 s, polls the runtime every 0.5 s, draws the sidebar. Nothing is stored in the browser. |
 | sidebarView | `extensions/google-meet/sidebar_view.js` | Pure: runtime answer → what the sidebar shows (status, transcript lines, recommendation, debug lines). Never adds text of its own. |
 | background.js | `extensions/google-meet/background.js` | Relays requests to `127.0.0.1:8765`, allowed by `host_permissions` (not by the page's CORS). |
 | Runtime | `src/closer_ai/live/server.py` | `POST /live-utterance`, `GET /recommendation`, `POST /dismiss`. One analysis thread per meeting, single flight. Also replays a synthetic stream. |
@@ -96,7 +96,13 @@ What is new: `src/closer_ai/live/` (session + server) and `extensions/google-mee
   5. a single candidate category. NEED_VALUE_FIT becomes PRICE_BUDGET only when the objection words
      themselves contain an explicit price word (caro, preço, orçamento, budget, custo...) and do not
      also deny the need (`price_override`; real Meet: E1 labeled "achei muito caro" NEED_VALUE_FIT
-     after a pain line). Logged as `category_before`;
+     after a pain line). TIMING_PRIORITY becomes AUTHORITY_INTERNAL_BUY_IN only when the objection
+     words state an explicit third-party decision dependency ("falar/validar/aprovar com o meu sócio /
+     chefe / diretoria", "quem decide é…", "aprovação do…") and contain no time marker ("mês que vem",
+     "viajando", a month, "safra"); a role word alone never counts (`authority_override`; real Meet:
+     the caption came as "Preciso falar com o meu sócio antes" and E1 labeled it TIMING_PRIORITY, 4/4
+     when reproduced). Both run before retrieval, so the knowledge unit follows the normalized
+     category. Logged as `category_before`;
   6. guidance status GUIDED, i.e. grounded. An invented date, number, person or condition rejects it.
      Guidance gets two evidence scopes: *objection evidence* (the episode's segments) and *allowed
      factual call evidence* (every captured segment of the window), so a fact the lead said earlier
@@ -106,8 +112,25 @@ What is new: `src/closer_ai/live/` (session + server) and `extensions/google-mee
   - another category, or the same one after the cooldown → replaces the current one (REPLACED);
   - after `--ttl` (90 s) → EXPIRED;
   - "Dispensar" → DISMISSED.
-- **Sidebar** (right side, above Meet's controls; scrollable transcript, recommendation pinned below,
-  "–" minimizes). Everything comes from one `GET /recommendation`:
+  - An analysis that ends in NO_RECOMMENDATION (e.g. a neutral line) does **not** clear the active
+    recommendation: it stays ACTIVE until replaced, expired or dismissed, while
+    `last_completed_analysis` shows the newer, empty result. Intentional (validated in the real Meet:
+    neutral `seg_5` NO_RECOMMENDATION next to the ACTIVE recommendation of `seg_4`).
+- **Debug counters (extension):** `captions_seen` = distinct Meet caption blocks (DOM nodes; Meet
+  reuses one block per speaking turn and keeps growing its text). `utterances_sent` = utterances the
+  tracker emitted and the runtime answered (closer and lead; each stable stretch of a growing block
+  is one utterance). So `captions_seen: 2, utterances_sent: 5` is normal.
+- **Sidebar** (right side, above Meet's controls; "–" minimizes). Order, top to bottom (v1):
+  1. **Cliente disse**: the lead's objection words, verbatim (`lead_said`);
+  2. **Sugestão**: what to say now (CommercialGuidance's grounded `suggested_question`), the largest
+     text on the panel; under it, small, `Objetivo: <move>` (`objective`) and the objection label;
+  3. "Analisando agora" while a lead line is being analyzed;
+  4. the transcript, smaller (context only);
+  5. the debug section, only with `--debug`.
+
+  Not shown to the seller by default: category code, knowledge unit, move id, grade, grounding,
+  segment ids, rationale. All of them stay in the debug section. Everything comes from one
+  `GET /recommendation` (polled every 0.5 s):
   - `transcript`: the last 8 utterances *as LiveSalesSession accepted them* (`Lead:` / `Closer:`;
     with `--debug`, `raw speaker → role`). A caption that did not reach the session is not shown;
   - `status`: `CAPTURING | ANALYZING | RECOMMENDATION_READY | NO_RECOMMENDATION | ERROR`;
@@ -116,18 +139,84 @@ What is new: `src/closer_ai/live/` (session + server) and `extensions/google-mee
     segment_id, category, outcome, reason, finished_at; debug "Última análise concluída"). Kept apart
     so an old result is never read as the current line's; a finished analysis swaps both and the
     recommendation under one lock;
-  - the active recommendation: "Objeção detectada" (label + category), "O que fazer" (the
-    knowledge unit's move), "O que falar" (CommercialGuidance's grounded `suggested_question`), one
-    short rationale. Never the whole unit;
-  - with `--debug`: `knowledge_unit`, `move` (code + id), `grade`, `grounding`, counters,
-    `active_segment`, the last completed analysis.
+  - the active recommendation: `lead_said`, `question`, `objective`, `label`; plus, for debug,
+    `category`, `move` (action line), `rationale`, `knowledge_unit`, `move_id`/`move_code`, `grade`,
+    `grounding`. Never the whole unit;
+  - with `--debug`: those technical fields, counters, `active_segment`, the last completed analysis.
 - **Latency:** one JSON line per analysis on stderr, technical fields only: sequence, timestamps,
   outcome/reason, category, prompt/output tokens.
   - `queue_wait_ms` = lead caption received → its analysis started (waiting for a running analysis);
   - `classifier_latency_ms` = analysis started → classifier done;
   - `guidance_latency_ms` = classifier done → guidance done;
   - `end_to_end_latency_ms` = caption received → outcome ready;
-  - `displayed_latency_ms` = caption received → first time the panel fetched the recommendation.
+  - `displayed_latency_ms` = caption received → first time the panel fetched the recommendation;
+  - per stage (v1): `caption_stable_wait_ms` (browser: last caption change → utterance emitted, from
+    the extension's `changed_at`), `caption_to_runtime_ms`, `policy_ms`, and per Ollama call
+    `ollama_load_ms` / `ollama_prompt_eval_ms` / `ollama_eval_ms` / `ollama_total_ms`;
+    `classifier_local_ms` / `guidance_local_ms` = time outside Ollama (prompt build, parse,
+    retrieval, validation, grounding).
+
+## Latency v1 (`feat/live-copilot-v1`, 2026-10-21)
+
+Benchmark (reproducible, real Ollama, synthetic lines, model already loaded):
+`python -m closer_ai.live.bench --runs 5` and `python -m closer_ai.live.bench --precision`.
+RTX 4050 Laptop 6 GB, qwen3:8b Q4_K_M, `num_ctx` 4096.
+
+Where the time goes (price line, before):
+
+| Stage | Time |
+|---|---|
+| browser: caption stable → emitted (`stableMs`) | 1.5 s (+ up to 0.5 s scan) |
+| emitted → runtime, trigger, queue (idle) | ~0 ms |
+| classifier prompt build + parse + validation | 10–30 ms |
+| Ollama classifier: prompt eval / generation | 0.06–1.0 s / **~8.0 s (135 tokens)** |
+| policy + retrieval | 0–1 ms |
+| guidance prompt build + validation + grounding | 6–20 ms |
+| Ollama guidance: prompt eval / generation | 0.06–0.7 s / **~7.0 s (120 tokens)** |
+| recommendation ACTIVE → browser poll | 0–1 s (1 s poll) |
+
+The bottleneck is token generation at ~17 tok/s: `ollama ps` shows the model 30 % on CPU / 70 % on
+GPU (6.0 GB with 4k context, ~1.3 GB of the 6 GB VRAM already used by other apps). Smaller
+`num_ctx` (3072, 2048) or `num_batch` 128 moved it only to 73–75 % GPU, within noise; not changed.
+
+Applied (each measured; none changes the model, taxonomy, knowledge, grounding or `price_override`):
+1. **Guidance output, live only** (`guide_episode(..., live=True)`): one-sentence rationale (it is
+   debug-only in the sidebar now) and Ollama structured outputs with `GUIDANCE_SCHEMA` (all keys,
+   segment ids as strings). Validation and grounding run unchanged. Output ~118 → ~93 tokens.
+2. **Model kept warm:** the runtime loads the model at start (warm-up) and sends `keep_alive` 30m
+   (`--keep-alive`). A cold load measured 6.7 s here (23 s in the first real Meet).
+3. **Sidebar poll 1 s → 0.5 s.**
+
+| Case (5 runs) | end_to_end median / max, before → after | displayed median / max, before → after |
+|---|---|---|
+| price | 15.6 / 16.3 s → **13.3 / 14.0 s** | 16.0 / 17.0 s → **13.5 / 14.0 s** |
+| authority ("Preciso falar com meu sócio antes de fechar.") | 16.2 / 17.4 s → **14.2 / 15.0 s** | 17.0 / 18.0 s → **14.5 / 15.0 s** |
+| neutral ("Hoje temos cinco pessoas no time.") | 1.7 / 2.7 s → 1.6 / 2.5 s, no recommendation | — |
+
+Precision probe (14 invented lines, 8 objections, 6 non-objections; same classifier):
+before **4/8** objections shown, 0 false; after **7/8**, 0 false (displayed median 14.0 s). Most
+rejected guidance before was `evidence_segment_ids` written as integers; the remaining miss
+(NEED_VALUE_FIT) is grounding rejecting an invented "hoje" (fail-closed, as intended).
+
+Real Meet (v1, 2026-10-22, test accounts): "Bom gostei da proposta, mas achei muito caro." →
+PRICE_BUDGET / GUIDED / VALID / ACTIVE, correct. "Preciso falar com o meu sócio antes de fechar." →
+TIMING_PRIORITY (wrong; caption cut at "antes"), fixed with `authority_override`; after the fix the
+same text gives AUTHORITY_INTERNAL_BUY_IN → `guidance.AUTHORITY_INTERNAL_BUY_IN` (M5, WEAK) → GUIDED
+→ ACTIVE. "Hoje temos cinco pessoas no time." → NO_RECOMMENDATION, correct. The real-Meet latency
+of the corrected authority path was not re-measured. Re-run after the fix (same probe): 7/8, 0 false,
+displayed median 16.0 s; the extra ~1.5 s vs the table above is slower generation on the machine
+(15.9 vs 17.8 tok/s, same tokens, neutral lines slower too); the normalization itself costs ~4 µs.
+
+Tested and **not** applied:
+- compact JSON for the classifier (135 → 85 tokens, −3 s): the model dropped a required key;
+  with a schema on the classifier too, one false recommendation (a pain line shown as
+  TIMING_PRIORITY) and one invalid run on a neutral line → classifier decisions changed;
+- compact JSON for the guidance (−1.3 s more): one worse suggestion out of 8;
+- skipping the classifier on "clearly neutral" lines: neutral lines already cost only ~1.7 s
+  (28 output tokens); a pre-filter would add false-negative risk for little gain.
+
+Seller-perceived time also includes the browser's 1.5 s caption-stability wait (unchanged: a shorter
+wait splits sentences mid-way in Meet's self-revising captions; not measured in a real meeting).
 
 ## Runtime configuration (measured)
 
@@ -167,11 +256,17 @@ python -m closer_ai.live.server --replay examples/live/smoke_price.txt --delay 2
 
 # 2. runtime for the extension (keep it open; timings go to stderr)
 python -m closer_ai.live.server --closer "Matheus"
+
+# 3. latency / precision benchmark (synthetic lines, real Ollama)
+python -m closer_ai.live.bench --runs 5
+python -m closer_ai.live.bench --precision
 ```
 
 Options:
 - `--window-seconds`, `--window-utterances`, `--cooldown`, `--ttl`: the live policy above;
 - `--arm`, `--num-ctx`, `--reserve-tokens`: the model configuration;
+- `--keep-alive` (default `30m`): how long Ollama keeps the model loaded; the runtime also loads it at
+  start;
 - `--debug` (temporary, test meetings only): logs every stage to stderr (`[CAPTION] [HTTP] [RUNTIME]
   [TRIGGER] [CLASSIFIER] [POLICY] [GUIDANCE] [GROUNDING] [STATE] [POLL]`, including caption text)
   and adds the debug section to the sidebar (raw speaker → role, retrieval provenance, counters). On
@@ -204,11 +299,23 @@ Options:
 
 ## Current limitations (v0)
 
-- **Latency:** ~16–25 s from caption to recommendation in the best local cases (qwen3:8b, RTX 4050
-  6 GB): one classifier call (~8–10 s) plus one guidance call (~7–8 s), plus the queue wait when an
-  analysis is already running.
+- **Latency:** v1 median ~13.5–14.5 s from caption to the sidebar (synthetic, model warm, idle
+  queue), plus 1.5 s of caption stability in the browser. Still two sequential LLM calls (~8 s
+  classifier + ~5–6 s guidance) at ~17 tok/s, because the model runs 30 % on CPU on a 6 GB GPU. A
+  lead line analyzed just before (e.g. a pain line the classifier tags IMPLEMENTATION, ~8–9 s) adds
+  queue wait. Not yet re-measured in a real Meet.
 - **Classifier accuracy:** the classifier can still pick the wrong category. Accuracy on short live
   lines is measured only on 12 synthetic one-liners plus the one real-meeting line above.
+- **Caption segmentation:** a pause of ≥ 1.5 s inside a sentence splits it ("Preciso falar com o
+  meu sócio antes" + "de fechar."); the tail is often too short to trigger, so the first half is what
+  gets classified. `authority_override` covers the case seen in the real Meet; the splitting itself
+  is unchanged.
+- **New objection after an old one in the window:** with a price objection earlier in the window, E1
+  sometimes annotates only the old line and the new authority line yields `NO_QUALIFYING_EPISODE`
+  (reproduced 2/2 synthetically). Not fixed.
+- **`authority_override` is a conservative normalization**, same rules as `price_override`:
+  TIMING_PRIORITY → AUTHORITY_INTERNAL_BUY_IN only on explicit third-party decision phrases; other
+  confusions are not corrected.
 - **`price_override` is a conservative normalization**, not a classifier: NEED_VALUE_FIT →
   PRICE_BUDGET only with an explicit price word in the objection text and no need denial. Other
   category confusions are not corrected.
@@ -229,7 +336,7 @@ Options:
 
 ## Backlog (from the 2026-10-21 meeting; not implemented)
 
-### B1 — Last utterance + recommendation UX
+### B1 — Last utterance + recommendation UX (done in v1, `feat/live-copilot-v1`)
 
 Make this pair the main thing on screen:
 

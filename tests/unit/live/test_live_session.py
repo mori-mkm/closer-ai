@@ -24,6 +24,8 @@ SCRIPT = {  # lead text -> category the fake classifier reports
     "Gostei, mas achei caro demais.": "NEED_VALUE_FIT",  # real-Meet E1 mislabel, normalized by the live policy
     "Não sei se isso resolve meu problema.": "NEED_VALUE_FIT",
     "Pera aí, travou tudo aqui.": None,  # noise: long enough to trigger, no objection
+    "Preciso falar com o meu sócio antes": "TIMING_PRIORITY",  # real-Meet E1 mislabel (caption cut at "antes")
+    "Agora não é um bom momento. Vamos falar mês que vem.": "TIMING_PRIORITY",
 }
 ANSWERS = {
     "PRICE_BUDGET": ("PRICE_BUDGET.M2", "O lead disse que achou caro.", "Caro em relação a quê?"),
@@ -32,6 +34,8 @@ ANSWERS = {
     "NEED_VALUE_FIT": ("NEED_VALUE_FIT.M1", "O lead não sabe se resolve o problema.", "Qual problema precisa resolver?"),
     "AUTHORITY_INTERNAL_BUY_IN": ("AUTHORITY_INTERNAL_BUY_IN.M1", "O lead quer falar com o sócio.",
                                   "Quem mais participa dessa decisão?"),
+    "TIMING_PRIORITY": ("TIMING_PRIORITY.M1", "O lead disse que agora não é um bom momento.",
+                        "O que precisa acontecer para ser um bom momento?"),
 }
 
 
@@ -45,7 +49,7 @@ class FakeProvider:
         self.prompts: list[str] = []
         self.bad_guidance = bad_guidance
 
-    def classify(self, prompt: str):
+    def classify(self, prompt: str, **_):
         self.prompts.append(prompt)
         segs = _SEG.findall(prompt)
         if prompt.startswith("GUIDANCE TASK"):
@@ -139,7 +143,7 @@ def test_seller_utterance_does_not_trigger_analysis(kb):
 
 
 def test_lead_objection_gives_one_grounded_recommendation(kb):
-    s, _, clock = _session(kb)
+    s, provider, clock = _session(kb)
     _say(s, clock, 1, "closer", "Como vocês fazem isso hoje?")
     _say(s, clock, 2, "lead", "Gostei da proposta, mas achei muito caro.")
     assert s.should_analyze()
@@ -148,6 +152,11 @@ def test_lead_objection_gives_one_grounded_recommendation(kb):
     view = s.current().view()
     assert view["state"] == "ACTIVE" and view["category"] == "PRICE_BUDGET" and view["label"]
     assert view["question"] == "Caro em relação a quê?" and view["move"] and view["rationale"]
+    # seller card: the lead's own objection words + the suggestion's objective
+    assert view["lead_said"] == "Gostei da proposta, mas achei muito caro."
+    assert view["objective"] and view["objective"][0].islower()
+    [g_prompt] = [p for p in provider.prompts if p.startswith("GUIDANCE TASK")]
+    assert "one short sentence in Portuguese" in g_prompt  # live asks for a brief rationale
     assert s.current_objection == "PRICE_BUDGET" and s.open_objections == ["PRICE_BUDGET"]
     assert not s.should_analyze()  # already analyzed
     assert {"queue_wait_ms", "classifier_latency_ms", "guidance_latency_ms", "end_to_end_latency_ms",
@@ -338,7 +347,7 @@ def test_busy_runtime_analyzes_only_the_latest_lead_next(kb):
     gate, started = threading.Event(), threading.Event()
 
     class Slow(FakeProvider):
-        def classify(self, prompt):
+        def classify(self, prompt, **_):
             if not started.is_set():
                 started.set()
                 gate.wait(5)  # the first (noise) analysis is still running
@@ -383,6 +392,44 @@ def test_explicit_price_words_win_over_need_value_fit(kb):
     assert (t["category"], "category_before" in t) == ("NEED_VALUE_FIT", False)
 
 
+def test_explicit_third_party_decision_wins_over_timing(kb):
+    from closer_ai.live.session import authority_override, price_override
+
+    def norm(category, text):  # the live policy applies both, in this order
+        return authority_override(price_override(category, text), text)
+
+    # the classifier label each line got (or could get) -> the category the live policy uses
+    assert norm("TIMING_PRIORITY", "Preciso falar com o meu sócio antes de fechar.") == "AUTHORITY_INTERNAL_BUY_IN"
+    assert norm("TIMING_PRIORITY", "Preciso falar com o meu sócio antes") == "AUTHORITY_INTERNAL_BUY_IN"
+    assert norm("TIMING_PRIORITY", "Tenho que validar isso com meu chefe antes de decidir.") == "AUTHORITY_INTERNAL_BUY_IN"
+    assert norm("TIMING_PRIORITY", "Quem decide isso é a diretoria.") == "AUTHORITY_INTERNAL_BUY_IN"
+    assert norm("TIMING_PRIORITY", "Preciso conversar com meu marido antes.") == "AUTHORITY_INTERNAL_BUY_IN"
+    assert norm("AUTHORITY_INTERNAL_BUY_IN", "Preciso falar com o meu sócio antes de fechar.") == "AUTHORITY_INTERNAL_BUY_IN"
+    assert norm("TIMING_PRIORITY", "Agora não é um bom momento. Vamos falar mês que vem.") == "TIMING_PRIORITY"
+    assert norm("NEED_VALUE_FIT", "Não sei se isso resolve meu problema.") == "NEED_VALUE_FIT"
+    assert norm("NEED_VALUE_FIT", "Gostei, mas achei muito caro.") == "PRICE_BUDGET"
+    # a role word alone, or a dependency plus an explicit time, is not overridden
+    assert norm("TIMING_PRIORITY", "Meu sócio gostou, mas agora não dá.") == "TIMING_PRIORITY"
+    assert norm("TIMING_PRIORITY", "Meu sócio está viajando e só volta mês que vem, então vamos deixar para novembro."
+                ) == "TIMING_PRIORITY"
+    assert norm("TIMING_PRIORITY", "Vou falar com meu sócio em novembro.") == "TIMING_PRIORITY"
+    assert norm("NEED_VALUE_FIT", "Preciso falar com meu sócio antes.") == "NEED_VALUE_FIT"  # only TIMING is touched
+
+    # through the session: normalized before retrieval, so the AUTHORITY knowledge unit is used
+    s, provider, clock = _session(kb)
+    _say(s, clock, 1, "lead", "Preciso falar com o meu sócio antes")
+    t = s.analyze()
+    assert (t["category_before"], t["category"], t["outcome"]) == ("TIMING_PRIORITY", "AUTHORITY_INTERNAL_BUY_IN",
+                                                                   "RECOMMENDED")
+    assert s.current().knowledge_unit == "guidance.AUTHORITY_INTERNAL_BUY_IN"
+    assert "Objection category (classifier): AUTHORITY_INTERNAL_BUY_IN" in provider.prompts[-1]
+    s, _, clock = _session(kb)
+    _say(s, clock, 1, "lead", "Agora não é um bom momento. Vamos falar mês que vem.")
+    t = s.analyze()
+    assert (t["category"], "category_before" in t) == ("TIMING_PRIORITY", False)
+    assert s.current().knowledge_unit == "guidance.TIMING_PRIORITY"
+
+
 def test_guidance_may_reuse_facts_said_earlier_in_the_window(kb):
     question = "Comparado ao tempo que vocês perdem hoje, caro em relação a quê?"
     s, _, clock = _session(kb, provider=FakeProvider(bad_guidance=question))
@@ -405,7 +452,7 @@ def test_active_analysis_is_never_confused_with_the_last_completed_one(kb):
     gate, in_price = threading.Event(), threading.Event()
 
     class Slow(FakeProvider):
-        def classify(self, prompt):
+        def classify(self, prompt, **_):
             if not prompt.startswith("GUIDANCE TASK") and "achei muito caro" in prompt:
                 in_price.set()
                 gate.wait(5)  # hold the price analysis open while the sidebar polls

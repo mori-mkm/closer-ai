@@ -33,8 +33,10 @@ function sidebarView(data, ctx) {
   const a = d.active_analysis;
   const analyzing = a ? { who: ROLE_LABEL[a.role] || "?", text: a.text_preview, segment: a.segment_id } : null;
 
+  // Seller-facing card: what the lead said + what to say now (+ a small objective). Codes, ids and
+  // the rationale stay in the debug lines.
   const rec = d.state === "ACTIVE"
-    ? { id: d.id, category: d.category, label: d.label, move: d.move, question: d.question, rationale: d.rationale }
+    ? { id: d.id, said: d.lead_said, question: d.question, objective: d.objective || null, label: d.label }
     : null;
 
   let debugLines = null;
@@ -57,10 +59,13 @@ function sidebarView(data, ctx) {
     debugLines.push("");
     if (rec) {
       debugLines.push(
+        `category: ${d.category}`,
         `knowledge_unit: ${d.knowledge_unit}`,
         `move: ${d.move_code || "-"} (${d.move_id})`,
         `grade: ${d.grade}`,
         `grounding: ${d.grounding}`,
+        `action: ${d.move}`,
+        `rationale: ${d.rationale}`,
       );
     }
     debugLines.push(`meeting_id: ${ctx.meetingId}`);
