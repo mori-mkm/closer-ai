@@ -1,143 +1,253 @@
-// AI Closer — content script on meet.google.com: captions -> local runtime; sidebar with the captured
-// transcript and the one active recommendation. Nothing is stored in the browser. Talks to the runtime
-// only through background.js. What the sidebar shows is decided by sidebarView() (sidebar_view.js).
+// AI Closer — content script on meet.google.com: captions -> local runtime; a small dock at the bottom
+// left with three retractable panels (Sugestão, Histórico, ⋯). Nothing is stored in the browser. Talks
+// to the runtime only through background.js. What is shown is decided by dockView()/dockReducer()
+// (sidebar_view.js); this file only draws it.
 
 (() => {
   const meetingId = location.pathname.slice(1);
   if (!/^[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(meetingId)) return; // not a meeting page
 
   const tracker = new CaptionTracker(meetingId);
-  const send = (msg) => new Promise((resolve) => chrome.runtime.sendMessage(msg, (r) => resolve(r || { ok: false })));
+  // Never throws, never resolves with nothing: every outcome is classified (see delivery.js).
+  const send = (msg) => new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(msg, (r) => {
+        const err = chrome.runtime.lastError; // e.g. the background worker was restarting
+        resolve(err || !r ? { ok: false, error: "EXTENSION_UNAVAILABLE", detail: err && err.message } : r);
+      });
+    } catch (e) { // the extension was reloaded/updated under this tab: reload the Meet tab
+      resolve({ ok: false, error: "EXTENSION_CONTEXT_INVALIDATED", detail: String(e) });
+    }
+  });
+  const delivery = new UtteranceDelivery();
+  const rehydrator = new Rehydrator();
 
-  // --- sidebar (shadow DOM so Meet's CSS cannot touch it). Right side, above Meet's control bar. ---
+  // --- dock (shadow DOM so Meet's CSS cannot touch it). Bottom left, above Meet's control bar. ---
+  const BASE_BOTTOM = 88; // Meet's control bar is ~80 px tall
   const host = document.createElement("div");
-  host.style.cssText = "position:fixed;right:16px;bottom:96px;z-index:2147483647;width:320px";
+  host.style.cssText = `position:fixed;left:16px;bottom:${BASE_BOTTOM}px;z-index:2147483647`;
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = `<style>
-    .panel{font:13px/1.4 system-ui,sans-serif;background:rgba(255,255,255,.97);color:#1f1f1f;border-radius:12px;
-      box-shadow:0 4px 16px rgba(0,0,0,.3);display:flex;flex-direction:column;max-height:calc(100vh - 200px)}
-    .head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #eee}
-    .brand{font-size:11px;font-weight:700;letter-spacing:.08em;color:#5f6368}
-    .dot{width:8px;height:8px;border-radius:50%;flex:none}
-    #status{font-size:12px;flex:1}
-    button{border:0;background:#eee;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px}
-    .sec{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#5f6368;margin:8px 12px 4px}
-    #transcript{overflow-y:auto;min-height:40px;max-height:140px;padding:0 12px 8px;flex:1 1 auto;font-size:12px;color:#3c4043}
-    .line{margin:0 0 3px}
-    .who{font-weight:600;margin-right:4px}
-    .who.lead{color:#b3261e}.who.closer{color:#1a73e8}
-    .empty{color:#80868b;font-style:italic}
-    #now{margin:8px 8px 0;padding:8px 12px;border-radius:10px;background:#fef7e0;border-left:4px solid #f9ab00;flex:none}
-    .nowtxt{font-style:italic}
-    #rec{margin:8px;padding:12px 14px;border-radius:12px;background:#e8f0fe;border-left:5px solid #1a73e8;flex:none}
-    .lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#5f6368;margin-top:10px}
+    :host{all:initial}
+    *{box-sizing:border-box}
+    .wrap{font:13px/1.45 "Google Sans",Roboto,system-ui,sans-serif;color:#e8eaed;display:flex;flex-direction:column;
+      align-items:flex-start;gap:8px}
+    .panel{width:min(360px,calc(100vw - 32px));background:#181818;border:1px solid #2a2a2a;border-radius:14px;
+      box-shadow:0 8px 24px rgba(0,0,0,.45);display:flex;flex-direction:column;overflow:hidden}
+    .ph{display:flex;align-items:center;gap:8px;padding:10px 12px 6px 14px}
+    .pt{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#9aa0a6;flex:1}
+    .pb{padding:4px 14px 14px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3c4043 transparent}
+    .x{border:0;background:transparent;color:#9aa0a6;font-size:16px;line-height:1;width:24px;height:24px;
+      border-radius:6px;cursor:pointer}
+    .x:hover{background:#2a2a2a;color:#e8eaed}
+    .lbl{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#9aa0a6;margin-top:12px}
     .lbl:first-child{margin-top:0}
-    .said{font-size:14px;font-style:italic;color:#3c4043;margin-top:2px}
-    .say{font-weight:700;font-size:17px;line-height:1.35;color:#174ea6;margin-top:2px}
-    .obj{font-size:11px;color:#5f6368;margin-top:8px}
-    .foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
-    .chip{font-size:10px;color:#5f6368;background:#fff;border-radius:10px;padding:1px 8px}
-    .dbg{font:10.5px/1.35 ui-monospace,monospace;color:#444;white-space:pre-wrap;border-top:1px solid #eee;
-      padding:6px 12px;flex:none}
+    .said{font-size:13px;font-style:italic;color:#bdbdbd;margin-top:2px}
+    .say{font-size:18px;font-weight:600;line-height:1.35;color:#fff;margin-top:4px}
+    .lbl.ready{color:#8ab4f8}
+    .obj{font-size:12px;color:#9aa0a6;margin-top:10px}
+    .foot{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+    .chip{font-size:11px;color:#bdbdbd;background:#242424;border-radius:10px;padding:2px 8px}
+    .live{display:flex;gap:6px;align-items:baseline;font-size:12px;color:#bdbdbd;margin-bottom:10px}
+    .live .d{width:7px;height:7px;border-radius:50%;flex:none;transform:translateY(-1px)}
+    .empty{color:#9aa0a6;font-style:italic}
+    .btn{border:0;background:#242424;color:#e8eaed;font:inherit;font-size:13px;border-radius:18px;
+      padding:7px 14px;cursor:pointer;position:relative;display:inline-flex;align-items:center;gap:6px}
+    .btn:hover{background:#2f2f2f}
+    .btn.on{background:#3c4043}
+    .btn.icon{padding:7px 11px;font-weight:700}
+    .btn.hot{box-shadow:inset 0 0 0 1px #8ab4f8;color:#8ab4f8}
+    .badge{width:8px;height:8px;border-radius:50%;background:#8ab4f8}
+    .dock{display:flex;align-items:center;gap:6px;background:#111;border:1px solid #2a2a2a;border-radius:24px;
+      padding:5px;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+    .st{display:inline-flex;align-items:center;gap:6px;padding:0 8px 0 6px;font-size:12px;color:#bdbdbd;
+      max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .dot{width:8px;height:8px;border-radius:50%;flex:none}
+    .warn{font-size:11px;color:#bdbdbd;background:#2a2a2a;border-radius:10px;padding:2px 8px;cursor:help}
+    .toast{font-size:12px;color:#8ab4f8;background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:4px 10px;
+      pointer-events:none}
+    .hl{margin-bottom:10px}
+    .hw{font-size:11px;font-weight:600;color:#9aa0a6}
+    .hw.lead{color:#e8eaed}
+    .ht{color:#bdbdbd}
+    .hl.lead .ht{color:#fff}
+    .mono{font:11px/1.45 ui-monospace,Consolas,monospace;color:#bdbdbd;white-space:pre-wrap;margin:0}
     [hidden]{display:none!important}
   </style>
-  <div class="panel">
-    <div class="head"><span class="brand">AI CLOSER</span><span class="dot" id="dot"></span><span id="status"></span>
-      <button id="min" title="Minimizar">–</button></div>
-    <div id="body">
-      <div id="rec" hidden>
-        <div class="lbl">Cliente disse</div>
-        <div class="said" id="said"></div>
-        <div class="lbl">Sugestão</div>
-        <div class="say" id="question"></div>
-        <div class="obj" id="objective"></div>
-        <div class="foot"><span class="chip" id="label"></span><button id="dismiss">Dispensar</button></div>
-      </div>
-      <div id="now" hidden>
-        <div class="lbl">Analisando agora</div>
-        <div><span class="who" id="nowwho"></span> <span class="nowtxt" id="nowtext"></span></div>
-      </div>
-      <div class="sec">Transcrição</div>
-      <div id="transcript"></div>
-      <div class="dbg" id="dbg" hidden></div>
+  <div class="wrap">
+    <div class="panel" id="p-suggestion" hidden>
+      <div class="ph"><span class="pt">Sugestão</span><button class="x" data-close title="Minimizar">–</button></div>
+      <div class="pb" id="sug"></div>
+    </div>
+    <div class="panel" id="p-history" hidden>
+      <div class="ph"><span class="pt">Histórico</span><button class="x" data-close title="Minimizar">–</button></div>
+      <div class="pb" id="hist" style="max-height:260px"></div>
+    </div>
+    <div class="panel" id="p-advanced" hidden>
+      <div class="ph"><span class="pt">Avançado</span><button class="x" data-close title="Minimizar">–</button></div>
+      <div class="pb" style="max-height:320px"><pre class="mono" id="adv"></pre></div>
+    </div>
+    <div class="toast" id="toast" hidden>Nova sugestão</div>
+    <div class="dock">
+      <span class="st"><span class="dot" id="dot"></span><span id="status"></span></span>
+      <span class="warn" id="warn" hidden></span>
+      <button class="btn" id="b-suggestion">Sugestão<span class="badge" id="badge" hidden></span></button>
+      <button class="btn" id="b-history">Histórico</button>
+      <button class="btn icon" id="b-advanced" title="Avançado" aria-label="Avançado">•••</button>
     </div>
   </div>`;
   document.documentElement.appendChild(host);
   const $ = (id) => root.getElementById(id);
-  $("dismiss").onclick = () => send({ type: "dismiss", body: { meeting_id: meetingId } }).then(poll);
-  $("min").onclick = () => { $("body").hidden = !$("body").hidden; $("min").textContent = $("body").hidden ? "+" : "–"; };
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  };
 
-  const counters = { captions_seen: 0, utterances_sent: 0, utterances_failed: 0 };
+  const counters = { captions_seen: 0 };
+  let health = null;
+  let polling = false;
   const seenKeys = new Set();
   let runtimeOk = false;
   let lastData = null;
-  let shownTranscript = "";
+  let ui = DOCK_INITIAL;
+  let view = null;
+  let shownHistory = "";
+  let shownSuggestion = "";
 
-  function renderTranscript(lines) {
+  const dispatch = (action) => { ui = dockReducer(ui, action); render(); };
+  for (const p of ["suggestion", "history", "advanced"]) {
+    $(`b-${p}`).onclick = () => dispatch({ type: "toggle", panel: p, recId: view && view.rec ? view.rec.id : null });
+  }
+  for (const b of root.querySelectorAll("[data-close]")) b.onclick = () => dispatch({ type: "close" });
+
+  function liveLine(color, text) {
+    const row = el("div", "live");
+    const d = el("span", "d");
+    d.style.background = color;
+    row.append(d, el("span", null, text));
+    return row;
+  }
+
+  function renderSuggestion(v) {
+    const key = JSON.stringify([v.rec, v.analyzing, v.detected]);
+    if (key === shownSuggestion) return; // redraw only on change (keeps the Dispensar button under the cursor)
+    shownSuggestion = key;
+    const box = $("sug");
+    box.replaceChildren();
+    // Below, in this order: what to say now (largest), what the client said, the objective.
+    if (v.detected) box.append(liveLine(TONES.objection, `Objeção detectada · ${v.detected.label}`));
+    else if (v.analyzing) box.append(liveLine(TONES.analyzing, `Analisando: “${v.analyzing.text}”`));
+    if (!v.rec) {
+      if (!v.analyzing) box.append(el("div", "empty", "Nenhuma sugestão ativa."));
+      else if (v.detected) box.append(el("div", "empty", "Preparando a sugestão…"));
+      return;
+    }
+    box.append(el("div", "lbl", "Cliente disse"), el("div", "said", `“${v.rec.said}”`),
+      el("div", "lbl ready", "Sugestão"), el("div", "say", `“${v.rec.question}”`));
+    if (v.rec.objective) box.append(el("div", "obj", `Objetivo: ${v.rec.objective}`));
+    const foot = el("div", "foot");
+    const dismiss = el("button", "btn", "Dispensar");
+    dismiss.onclick = () => {
+      dispatch({ type: "dismiss", recId: v.rec.id });
+      send({ type: "dismiss", body: { meeting_id: meetingId } }).then(poll);
+    };
+    foot.append(el("span", "chip", v.rec.label || ""), dismiss);
+    box.append(foot);
+  }
+
+  function renderHistory(lines) {
     const key = JSON.stringify(lines);
-    if (key === shownTranscript) return;
-    shownTranscript = key;
-    const box = $("transcript");
+    if (key === shownHistory) return;
+    shownHistory = key;
+    const box = $("hist");
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
     box.replaceChildren();
-    if (!lines.length) {
-      const e = document.createElement("div");
-      e.className = "empty";
-      e.textContent = "Nenhuma fala recebida pelo runtime ainda.";
-      box.append(e);
-    }
+    if (!lines.length) box.append(el("div", "empty", "Nenhuma fala recebida pelo runtime ainda."));
     for (const l of lines) {
-      const row = document.createElement("div");
-      row.className = "line";
-      const who = document.createElement("span");
-      who.className = `who ${l.role}`;
-      who.textContent = `${l.who}:`;
-      row.append(who, document.createTextNode(l.text));
+      const row = el("div", `hl ${l.role}`);
+      row.append(el("div", `hw ${l.role}`, l.who), el("div", "ht", l.text));
       box.append(row);
     }
     if (atBottom) box.scrollTop = box.scrollHeight;
   }
 
   function render() {
-    const v = sidebarView(lastData, {
-      runtimeOk, captionsOn: MeetCaptionAdapter.region(document) !== null, counters, meetingId,
+    view = dockView(lastData, {
+      runtimeOk, captionsOn: MeetCaptionAdapter.region(document) !== null, counters, meetingId, health, delivery,
+      rehydrator,
     });
-    $("status").textContent = v.status.text;
-    $("dot").style.background = v.status.color;
-    renderTranscript(v.transcript);
-    $("now").hidden = !v.analyzing;
-    if (v.analyzing) {
-      $("nowwho").textContent = `${v.analyzing.who}:`;
-      $("nowtext").textContent = `"${v.analyzing.text}"`;
+    const chrome_ = dockChrome(ui, view, Date.now());
+    $("dot").style.background = view.color;
+    $("status").textContent = view.status;
+    $("warn").hidden = !view.warning;
+    if (view.warning) { $("warn").textContent = `⚠ ${view.warning.count}`; $("warn").title = view.warning.text; }
+    $("badge").hidden = !chrome_.badge;
+    $("b-suggestion").classList.toggle("hot", chrome_.active);
+    $("toast").hidden = !chrome_.toast;
+    for (const p of ["suggestion", "history", "advanced"]) {
+      $(`p-${p}`).hidden = ui.open !== p;
+      $(`b-${p}`).classList.toggle("on", ui.open === p);
     }
-    $("rec").hidden = !v.rec;
-    if (v.rec) {
-      $("said").textContent = `“${v.rec.said}”`;
-      $("question").textContent = `“${v.rec.question}”`;
-      $("objective").textContent = v.rec.objective ? `Objetivo: ${v.rec.objective}` : "";
-      $("label").textContent = v.rec.label || "";
+    if (ui.open === "suggestion") renderSuggestion(view); else shownSuggestion = "";
+    if (ui.open === "history") renderHistory(view.history); else shownHistory = "";
+    if (ui.open === "advanced") {
+      const a = view.advanced;
+      $("adv").textContent = [...a.basic, ...(a.technical ? ["", ...a.technical]
+        : ["", "Detalhes técnicos: inicie o runtime com --debug."])].join("\n");
     }
-    $("dbg").hidden = !v.debugLines;
-    if (v.debugLines) $("dbg").textContent = v.debugLines.join("\n");
+  }
+
+  // Keep the dock above Meet's captions when they reach the left side (small windows, long captions).
+  function place() {
+    const region = MeetCaptionAdapter.region(document);
+    let bottom = BASE_BOTTOM;
+    if (region) {
+      const r = region.getBoundingClientRect();
+      const dockRight = 16 + Math.min(360, innerWidth - 32);
+      if (r.height > 0 && r.left < dockRight && r.top < innerHeight - BASE_BOTTOM) {
+        bottom = Math.max(BASE_BOTTOM, Math.round(innerHeight - r.top + 8));
+      }
+    }
+    host.style.bottom = `${bottom}px`;
+    for (const p of root.querySelectorAll(".panel")) p.style.maxHeight = `${Math.max(160, innerHeight - bottom - 80)}px`;
   }
 
   async function poll() {
+    if (polling) return; // one GET at a time: an answer is never overtaken by an older one
+    polling = true;
     const r = await send({ type: "poll", meeting_id: meetingId });
+    polling = false;
     runtimeOk = r.ok;
     lastData = r.ok ? r.data : null;
+    if (lastData) rehydrator.observe(lastData.instance);
+    if (rehydrator.due()) { // the runtime restarted: give this meeting's transcript back, once
+      send({ type: "rehydrate", body: { meeting_id: meetingId, utterances: delivery.heldUtterances() } })
+        .then((rr) => rehydrator.result(rr));
+    }
+    const recId = lastData && lastData.state === "ACTIVE" ? lastData.id : null;
+    ui = dockReducer(ui, { type: "data", recId, now: Date.now() });
     render();
   }
 
   setInterval(() => {
     const captions = MeetCaptionAdapter.read(document);
     for (const c of captions) if (!seenKeys.has(c.key)) { seenKeys.add(c.key); counters.captions_seen++; }
-    for (const u of tracker.tick(Date.now(), captions)) {
-      send({ type: "utterance", body: u }).then((r) => {
-        runtimeOk = r.ok;
-        if (r.ok) counters.utterances_sent++; else counters.utterances_failed++;
-      });
+    const now = Date.now();
+    for (const u of tracker.tick(now, captions)) delivery.add(u, now);
+    for (const u of delivery.due(now)) { // first attempts and bounded retries, same id each time
+      send({ type: "utterance", body: u }).then((r) => delivery.result(u.sequence, r, Date.now()));
     }
+    place();
   }, 500);
-  setInterval(poll, 500); // loopback GET: cheap; halves the wait between "ready" and "on screen"
+  setInterval(poll, 500); // loopback GET: cheap; a new suggestion reaches the dock within 0.5 s
+  const checkHealth = () => send({ type: "health" }).then((r) => {
+    health = r.ok ? r.data : null;
+    if (health) rehydrator.observe(health.instance);
+  });
+  setInterval(checkHealth, 5000);
+  checkHealth();
+  addEventListener("resize", place);
   poll();
 })();

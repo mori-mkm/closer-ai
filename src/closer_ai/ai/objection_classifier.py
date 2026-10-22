@@ -264,6 +264,33 @@ _EPISODE_KEYS = {
 }
 _SPAN_KEYS = {"segment_ids", "status"}
 
+# The output shape above as a JSON schema, for providers that enforce it while generating (Ollama
+# structured outputs). Types and exact keys only: no enums, so labels are never steered; every value is
+# still checked by `_parse` and `validate_predictions`. Live soak, Oct 2026: on 12-utterance windows
+# qwen3:8b dropped "category_candidates" or corrupted a key ("obj,ection_segment_ids") in 41/93 analyses;
+# with the schema, 0/10 long windows malformed and the live precision probe unchanged (7/8, 0 false).
+_STR, _NSTR = {"type": "string"}, {"type": ["string", "null"]}
+_STRS = {"type": "array", "items": {"type": "string"}}
+_NULLABLE = {"category", "reaction"}
+_LISTS = {"objection_segment_ids", "context_segment_ids", "category_candidates", "reaction_candidates", "segment_ids"}
+
+
+def _object(keys: tuple[str, ...], **special: dict) -> dict:
+    # Key order = OUTPUT_REQUIREMENTS order: the provider generates keys in schema order.
+    props = {k: special.get(k) or (_STRS if k in _LISTS else _NSTR if k in _NULLABLE else _STR) for k in keys}
+    return {"type": "object", "properties": props, "required": list(keys), "additionalProperties": False}
+
+
+_EPISODE_ORDER = ("prediction_id", "objection_segment_ids", "context_segment_ids", "category_status", "category",
+                  "category_candidates", "reaction_status", "reaction", "reaction_candidates", "resolution_status",
+                  "summary")
+CLASSIFIER_SCHEMA = _object(
+    ("call_detection", "episodes", "uncertain_spans"),
+    episodes={"type": "array", "items": _object(_EPISODE_ORDER)},
+    uncertain_spans={"type": "array", "items": _object(("segment_ids", "status"))},
+)
+assert set(_EPISODE_ORDER) == _EPISODE_KEYS
+
 
 def _keys(obj: Any, expected: set[str], where: str) -> Mapping[str, Any]:
     if not isinstance(obj, Mapping) or set(obj) != expected:
@@ -450,6 +477,7 @@ def classify_call(
     provider: ClassificationProvider,
     knowledge_root: Path | None = None,
     knowledge_git_sha: str | None = None,
+    structured: bool = False,
 ) -> ClassificationRun:
     """Build the arm's prompt, call the provider once, parse, validate, return the run record.
 
@@ -459,7 +487,8 @@ def classify_call(
     if not isinstance(call, Call):
         raise TypeError(f"call must be a canonical Call, got {type(call).__name__}")
     prompt, knowledge = _assemble(call, arm, knowledge_root)
-    response = provider.classify(prompt)
+    # structured (live copilot): the provider enforces CLASSIFIER_SCHEMA; the prompt is unchanged
+    response = provider.classify(prompt, schema=CLASSIFIER_SCHEMA) if structured else provider.classify(prompt)
     call_detection, episodes, spans = _parse(response)
     encoded = prompt.encode("utf-8")
     return ClassificationRun(

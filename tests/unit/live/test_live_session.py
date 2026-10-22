@@ -273,7 +273,15 @@ def test_local_http_runtime_end_to_end(kb):
                                                ("Ana", "Gostei da proposta, mas achei muito caro.")], 1):
             status, body = call("/live-utterance", {"meeting_id": "m", "speaker": speaker, "text": text,
                                                     "timestamp": 1_700_000_000 + seq, "sequence": seq})
-            assert (status, body) == (200, {"accepted": True, "role": "closer" if seq == 1 else "lead"})
+            assert (status, body) == (200, {"accepted": True, "status": "ACCEPTED", "id": seq,
+                                            "role": "closer" if seq == 1 else "lead"})
+        # a retry of the same utterance (same id) is confirmed as a duplicate and never added twice
+        status, body = call("/live-utterance", {"meeting_id": "m", "speaker": "Ana", "sequence": 2,
+                                                "text": "Gostei da proposta, mas achei muito caro."})
+        assert (body["accepted"], body["status"], body["id"]) == (False, "DUPLICATE_SEQUENCE", 2)
+        status, health = call("/health", header=False)  # no header needed, no call data
+        assert status == 200 and set(health) == {"status", "runtime", "model", "model_state", "instance"}
+        assert (health["status"], health["runtime"], health["model"]) == ("ok", "ready", "fake-1")
         for _ in range(100):  # analysis runs in the background worker
             status, rec = call("/recommendation?meeting_id=m")
             if rec["state"] == "ACTIVE":
@@ -291,7 +299,9 @@ def test_local_http_runtime_end_to_end(kb):
         assert call("/dismiss", {"meeting_id": "m"})[0] == 200
         after = call("/recommendation?meeting_id=m")[1]
         assert (after["state"], after["status"], len(after["transcript"])) == ("NONE", "CAPTURING", 2)
-        assert call("/recommendation?meeting_id=other")[1] == {"state": "NONE", "status": "CAPTURING", "transcript": []}
+        assert call("/health", header=False)[1]["model_state"] == "ready"  # an analysis ran
+        assert call("/recommendation?meeting_id=other")[1] == {"state": "NONE", "status": "CAPTURING", "transcript": [],
+                                                               "instance": runtime.instance}
         assert call("/live-utterance", {"meeting_id": "m"})[0] == 400
     finally:
         server.shutdown()
@@ -308,9 +318,11 @@ def test_sidebar_status_and_debug_speaker(kb):
     assert view["transcript"] == [{"role": "closer", "text": "Como vocês fazem isso hoje?", "speaker": "Você"}]
     say(2, "Matheus Mori", "Faz sentido, gostei bastante.")  # no objection
     assert rt.recommendation("m")["status"] == "NO_RECOMMENDATION"
-    rt._busy.add("m")
+    latency = rt.recommendation("m")["debug"]["latency"]  # last analysis, for the advanced panel
+    assert {"queue_wait_ms", "classifier_latency_ms", "end_to_end_latency_ms"} <= set(latency)
+    rt.sessions["m"].pending_lead_seq = 2  # a lead line waiting for the worker is already ANALYZING
     assert rt.recommendation("m")["status"] == "ANALYZING"
-    rt._busy.discard("m")
+    rt.sessions["m"].pending_lead_seq = None
     rt.sessions["m"].last_outcome = "NO_RECOMMENDATION:ERROR:OllamaError"
     assert rt.recommendation("m")["status"] == "ERROR"
 
@@ -450,12 +462,16 @@ def test_guidance_may_reuse_facts_said_earlier_in_the_window(kb):
 
 def test_active_analysis_is_never_confused_with_the_last_completed_one(kb):
     gate, in_price = threading.Event(), threading.Event()
+    guidance_gate, in_guidance = threading.Event(), threading.Event()
 
     class Slow(FakeProvider):
         def classify(self, prompt, **_):
             if not prompt.startswith("GUIDANCE TASK") and "achei muito caro" in prompt:
                 in_price.set()
                 gate.wait(5)  # hold the price analysis open while the sidebar polls
+            if prompt.startswith("GUIDANCE TASK") and "caro" in prompt:
+                in_guidance.set()
+                guidance_gate.wait(5)  # hold the guidance open: objection known, suggestion not ready
             return super().classify(prompt)
 
     rt = Runtime(Slow(), LiveConfig(), {"Matheus"}, log=lambda s: None)
@@ -479,7 +495,13 @@ def test_active_analysis_is_never_confused_with_the_last_completed_one(kb):
     assert {k: during["last_completed_analysis"][k] for k in ("segment_id", "category", "outcome", "reason")} == {
         "segment_id": "seg_2", "category": "IMPLEMENTATION_INTEGRATION", "outcome": "NO_RECOMMENDATION",
         "reason": "UNCORROBORATED_CATEGORY"}
+    assert "detected_category" not in during["active_analysis"]  # classifier still running
     gate.set()
+    assert in_guidance.wait(5)
+    detected = rt.recommendation("m")  # policy decided, guidance not ready: the sidebar's red state
+    assert detected["state"] == "NONE" and detected["active_analysis"]["detected_category"] == "PRICE_BUDGET"
+    assert detected["active_analysis"]["label"] == "Preço / orçamento"
+    guidance_gate.set()
     for _ in range(100):
         after = rt.recommendation("m")
         if after["active_analysis"] is None:
@@ -488,3 +510,128 @@ def test_active_analysis_is_never_confused_with_the_last_completed_one(kb):
     assert after["state"] == "ACTIVE" and after["category"] == "PRICE_BUDGET"
     assert {k: after["last_completed_analysis"][k] for k in ("segment_id", "category", "outcome")} == {
         "segment_id": "seg_4", "category": "PRICE_BUDGET", "outcome": "RECOMMENDED"}
+
+
+# --- P0 reliability ---------------------------------------------------------------------------------
+
+def test_second_runtime_on_the_same_port_fails_clearly(kb):
+    from closer_ai.live.server import bind_or_explain
+    rt = Runtime(FakeProvider(), LiveConfig(), {"Matheus"}, log=lambda s: None)
+    first = bind_or_explain(0, make_handler(rt))
+    port = first.server_address[1]
+    threading.Thread(target=first.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(SystemExit) as exc:
+            bind_or_explain(port, make_handler(rt))
+        assert f"ERROR: AI Closer runtime already running on 127.0.0.1:{port}" in str(exc.value)
+    finally:
+        first.shutdown()
+        first.server_close()
+
+
+def test_retries_are_idempotent_and_counted(kb):
+    s, _, clock = _session(kb)
+    assert _say(s, clock, 1, "closer", "Como vocês fazem isso hoje?")
+    assert not _say(s, clock, 1, "closer", "Como vocês fazem isso hoje?")  # retry, same id
+    assert s.last_add_status == "DUPLICATE_SEQUENCE"
+    assert not _say(s, clock, 2, "closer", "Como vocês fazem isso hoje?")  # caption repeated, new id
+    assert s.last_add_status == "DUPLICATE_TEXT"
+    assert not _say(s, clock, 3, "lead", "   ")
+    assert s.last_add_status == "EMPTY"
+    assert len(s.utterances) == 1
+    assert {k: s.counters[k] for k in ("received", "accepted", "duplicates_suppressed", "rejected")} == {
+        "received": 4, "accepted": 1, "duplicates_suppressed": 2, "rejected": 1}
+    _say(s, clock, 4, "lead", "Gostei da proposta, mas achei muito caro.")
+    s.analyze()
+    assert {k: s.counters[k] for k in ("analyses_started", "analyses_completed", "recommendations_created")} == {
+        "analyses_started": 1, "analyses_completed": 1, "recommendations_created": 1}
+
+
+def test_an_unexpected_error_never_leaves_the_dock_stuck_analyzing(kb):
+    class Broken(FakeProvider):
+        def classify(self, prompt, **_):
+            raise KeyError("boom")  # not an Ollama/format error: a bug anywhere in the pipeline
+
+    s, _, clock = _session(kb, provider=Broken())
+    _say(s, clock, 1, "lead", "Gostei da proposta, mas achei muito caro.")
+    t = s.analyze()
+    assert (t["outcome"], t["reason"]) == ("NO_RECOMMENDATION", "ERROR:UNEXPECTED:KeyError")
+    assert s.active_analysis is None and s.last_completed_analysis["reason"] == "ERROR:UNEXPECTED:KeyError"
+    assert s.counters["analysis_errors"] == 1
+    assert s.error_reasons == {"OTHER": 1} and "KeyError" in s.error_examples["OTHER"]  # counted by type, not lumped
+
+
+# --- session recovery after a runtime restart ---------------------------------------------------------
+
+MEETING = [(1, "Você", "Como vocês fazem esse processo hoje?"), (2, "Lead Teste", "Hoje temos cinco pessoas no time."),
+           (3, "Lead Teste", "Gostei da proposta, mas achei muito caro.")]
+
+
+def _payload(seq, speaker, text):
+    return {"speaker": speaker, "text": text, "timestamp": 1_700_000_000 + seq, "sequence": seq}
+
+
+def test_restart_rehydration_restores_context_without_reanalysis(kb):
+    old = Runtime(FakeProvider(), LiveConfig(), {"Matheus"}, log=lambda s: None)
+    old.knowledge = kb
+    for seq, sp, tx in MEETING:  # 1. the meeting had 3 utterances (the lead lines were analyzed live)
+        assert old.receive(parse_utterance({"meeting_id": "m", **_payload(seq, sp, tx)}, old.closer_names, 1.0),
+                           background=False) == "ACCEPTED"
+    assert old.sessions["m"].current() is not None
+
+    provider = FakeProvider()  # 2. runtime restarted: new process, empty sessions, a new instance id
+    new = Runtime(provider, LiveConfig(), {"Matheus"}, log=lambda s: None)
+    new.knowledge = kb
+    assert new.instance != old.instance and new.recommendation("m")["transcript"] == []
+
+    out = new.rehydrate("m", [_payload(*u) for u in MEETING])  # 3. the extension sends them back
+    s = new.sessions["m"]
+    assert out["rehydrated"] == 3 and out["utterances"] == 3
+    view = new.recommendation("m")
+    assert [u["text"] for u in view["transcript"]] == [tx for _, _, tx in MEETING]  # 4. history kept, in order
+    assert [u["role"] for u in view["transcript"]] == ["closer", "lead", "lead"]
+    assert provider.prompts == [] and not s.should_analyze() and view["status"] == "CAPTURING"  # 5. no analysis
+    assert (view["state"], view["last_completed_analysis"]) == ("NONE", None)  # nothing invented
+    assert (s.counters["received"], s.counters["accepted"], s.counters["rehydrated"]) == (0, 0, 3)  # not live delivery
+
+    assert new.rehydrate("m", [_payload(*u) for u in MEETING])["rehydrated"] == 0  # 7. idempotent (resent twice)
+    status = new.receive(parse_utterance({"meeting_id": "m", **_payload(4, "Lead Teste",
+                                          "Se der certo, eu quero avançar ainda esse mês.")}, new.closer_names, 2.0),
+                         background=False)
+    assert status == "ACCEPTED" and len(s.utterances) == 4  # 6. a new line is the fourth...
+    assert [u.sequence for u in s.utterances] == [1, 2, 3, 4]
+    assert len(provider.prompts) >= 1  # ...and is analyzed live, as usual
+    assert new.receive(parse_utterance({"meeting_id": "m", **_payload(3, "Lead Teste", MEETING[2][2])},
+                                       new.closer_names, 2.0)) == "DUPLICATE_SEQUENCE"  # a late retry: no duplicate
+    assert len(s.utterances) == 4
+    assert new.recommendation("other")["transcript"] == []  # 8. another meeting inherits nothing
+
+
+def test_rehydrated_lines_never_reanalyzed_even_if_a_live_retry_came_first(kb):
+    s, provider, clock = _session(kb)
+    _say(s, clock, 5, "lead", "Gostei da proposta, mas achei muito caro.")  # an old line retried live after restart
+    assert s.should_analyze()
+    added = s.rehydrate([LiveUtterance("m1", "Lead", "lead", "Hoje temos cinco pessoas no time.", 1.0, 4, 1.0),
+                         LiveUtterance("m1", "Lead", "lead", "Preciso falar com meu sócio antes de fechar.", 1.0, 6, 1.0)])
+    assert added == 2 and [u.sequence for u in s.utterances] == [4, 5, 6]
+    assert not s.should_analyze()  # line 5 is older than what the previous runtime had already seen
+    assert provider.prompts == []
+
+
+def test_rehydrate_endpoint_over_http(kb):
+    rt = Runtime(FakeProvider(), LiveConfig(), {"Matheus"}, log=lambda s: None)
+    rt.knowledge = kb
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(rt))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        body = json.dumps({"meeting_id": "m", "utterances": [_payload(*u) for u in MEETING]}).encode()
+        req = urllib.request.Request(base + "/rehydrate", data=body,
+                                     headers={"X-AI-Closer": "1", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            out = json.loads(r.read())
+        assert (out["rehydrated"], out["utterances"], out["instance"]) == (3, 3, rt.instance)
+        with urllib.request.urlopen(base + "/health", timeout=5) as r:
+            assert json.loads(r.read())["instance"] == rt.instance
+    finally:
+        server.shutdown()

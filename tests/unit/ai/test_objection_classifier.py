@@ -96,7 +96,8 @@ def test_facts_render_segment_ids_roles_and_order_only():
 
 def test_classifier_accepts_no_deal_outcome_or_crm_input():
     params = set(inspect.signature(classify_call).parameters)
-    assert params == {"call", "arm", "provider", "knowledge_root", "knowledge_git_sha"}
+    # `structured` is a generation option (provider-enforced output schema), not call/deal data
+    assert params == {"call", "arm", "provider", "knowledge_root", "knowledge_git_sha", "structured"}
     assert set(inspect.signature(build_prompt).parameters) == {"call", "arm", "knowledge_root"}
 
 
@@ -275,3 +276,24 @@ def test_knowledge_change_changes_e2_only(tmp_path: Path):
 def test_prompt_has_no_carriage_returns():
     for arm in ("E0", "E1", "E2"):
         assert "\r" not in build_prompt(CALL, arm, KB)
+
+
+def test_structured_mode_sends_the_exact_output_schema_and_still_validates():
+    from closer_ai.ai.objection_classifier import _EPISODE_KEYS, _RESPONSE_KEYS, CLASSIFIER_SCHEMA
+
+    class Recording(ScriptedClassificationProvider):
+        def classify(self, prompt, **kw):
+            self.kw = kw
+            return super().classify(prompt)
+
+    assert set(CLASSIFIER_SCHEMA["required"]) == _RESPONSE_KEYS
+    episode = CLASSIFIER_SCHEMA["properties"]["episodes"]["items"]
+    assert set(episode["required"]) == _EPISODE_KEYS and episode["additionalProperties"] is False
+    assert list(episode["properties"])[:3] == ["prediction_id", "objection_segment_ids", "context_segment_ids"]
+    assert "enum" not in str(CLASSIFIER_SCHEMA)  # types and keys only: labels are never steered
+    p = Recording(response())
+    classify_call(CALL, "E0", p, structured=True)
+    assert p.kw == {"schema": CLASSIFIER_SCHEMA}
+    p = Recording(response())
+    classify_call(CALL, "E0", p)
+    assert p.kw == {}  # default (eval runner, post-call): plain JSON, unchanged

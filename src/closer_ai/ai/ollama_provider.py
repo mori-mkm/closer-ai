@@ -113,7 +113,7 @@ class OllamaClassificationProvider:
             raise OllamaError("Ollama API response has no string 'response' field")
         if api.get("done") is not True:
             raise OllamaError(f"Ollama generation not done (done_reason={api.get('done_reason')!r})")
-        self.last_usage = {k: api[k] for k in _USAGE_KEYS if k in api}
+        self.last_usage = {k: api[k] for k in (*_USAGE_KEYS, "done_reason") if k in api}
 
         try:
             content = json.loads(api["response"])

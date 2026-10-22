@@ -5,12 +5,12 @@ Reconciliar o documento inteiro; não empilhar correções no fim._
 
 ## Snapshot
 
-- Data do snapshot: 2026-10-21 (fechamento do Live Meet Copilot v0)
-- Code baseline reviewed: `f54ea28` (Objection Guidance Engine v0) + checkpoint Live Meet Copilot v0
-- Tests: **737 passed** (`pytest -q`) após Objection Guidance Engine v0/v0.1 + Live Meet Copilot v0
-  + v1 (+145 sobre 592: guidance, grounding, post-call, CLI/pilot runner, long-call
-  chunking, live session). Extensão: `node --test` em `extensions/google-meet/meet_adapter.test.js`
-  (5) e `sidebar_view.test.js` (6). Todos herméticos: nenhum teste exige Ollama, rede ou dado real
+- Data do snapshot: 2026-10-22 (Live Copilot: Dock UX + P0 Reliability + session recovery)
+- Code baseline reviewed: `aeb9352` (merge do Live Copilot v1) + branch `feat/live-copilot-dock-ux`
+- Tests: **744 passed** (`pytest -q`) após Objection Guidance Engine v0/v0.1 + Live Meet Copilot
+  v0/v1 + dock/reliability (+152 sobre 592: guidance, grounding, post-call, CLI/pilot runner, long-call
+  chunking, live session, delivery/recovery). Extensão: `node --test` em
+  `extensions/google-meet/meet_adapter.test.js` (12) e `sidebar_view.test.js` (15). Todos herméticos: nenhum teste exige Ollama, rede ou dado real
 - Lint: `ruff check .` limpo
 - CI: `.github/workflows/ci.yml` (import sanity check, `ruff check .`, `pytest -q`) em toda PR e
   push para `main`
@@ -132,8 +132,13 @@ sem enforcement de "sem PII"), TD-12 (branch protection não verificada).
 
 ## Next technical step
 
-Live Meet Copilot v1 (UX do vendedor + latência + normalização de AUTHORITY) está fechado na branch
-`feat/live-copilot-v1`, validado em Meet real de teste. Depois, a decidir
+Live Copilot Dock UX + P0 Reliability + session recovery fechados na branch
+`feat/live-copilot-dock-ux`, validados em Meet real de teste (dock escuro retrátil; delivery contract
+com retry/idempotência/taxonomia de falhas; runtime exclusivo; `/health`; schema do classifier imposto
+no live: soak de 30 min com 0 erros técnicos; recovery via `/rehydrate` sem reanálise). Follow-ups:
+**latest-utterance anchoring / precision** (nova objeção ignorada com objeção antiga na janela) e
+memória/latência do modelo (P1, Otávio). Detalhes no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md).
+Depois, a decidir
 entre os itens do backlog no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented):
 B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Opportunity Detection. B2 e
 B3 dependem do playbook comercial AgroTalento (Gabriel). Em paralelo: testar as outras 7 categorias
