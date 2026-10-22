@@ -4,9 +4,14 @@
     python -m closer_ai.live.server --replay examples/live/smoke_price.txt --delay 2   # no Meet needed
 
 Endpoints (the Chrome extension's background worker is the only intended client):
-- POST /live-utterance  {"meeting_id", "speaker", "text", "timestamp", "sequence"} -> {"accepted"}
+- POST /live-utterance  {"meeting_id", "speaker", "text", "timestamp", "sequence"}
+                        -> {"accepted", "status", "id", "role"}; idempotent per (meeting_id, sequence): a retry
+                           of an utterance already received answers status DUPLICATE_SEQUENCE
 - GET  /recommendation?meeting_id=...                                  -> the current one or {"state": "NONE"}
 - POST /dismiss         {"meeting_id"}
+- POST /rehydrate       {"meeting_id", "utterances": [...]} -> {"rehydrated", "utterances"}: after a runtime
+                        restart the extension sends back what this meeting already had (context only)
+- GET  /health          -> {"status", "runtime", "model", "model_state", "instance"} (no call data)
 
 Every request needs the header `X-AI-Closer: 1` and POST bodies `Content-Type: application/json`;
 both force a CORS preflight that this server never answers, so an ordinary web page cannot write to
@@ -18,9 +23,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import sys
 import threading
 import time
+import urllib.request
+import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -35,6 +43,7 @@ from closer_ai.live.session import LiveConfig, LiveSalesSession, LiveUtterance
 DEFAULT_PORT = 8765
 SELF_LABELS = ("você", "voce", "you")  # how Meet captions the local user
 _MAX_BODY = 64 * 1024
+_MAX_REHYDRATE_BODY = 1024 * 1024  # up to ~1000 utterances of one meeting
 
 
 def role_for(speaker: str, closer_names: set[str]) -> str:
@@ -81,6 +90,10 @@ class Runtime:
         self.sessions: dict[str, LiveSalesSession] = {}
         self._busy: set[str] = set()
         self._lock = threading.Lock()
+        self.model = getattr(provider, "model", None)
+        self.model_state = "unknown"  # unknown | ready | unavailable (warm-up and every analysis update it)
+        # A new id per process: the extension sees it change after a restart and rehydrates the meeting.
+        self.instance = uuid.uuid4().hex[:12]
 
     def session(self, meeting_id: str) -> LiveSalesSession:
         with self._lock:
@@ -95,13 +108,16 @@ class Runtime:
         if self.debug:
             self.log(f"[{tag}] " + json.dumps(fields, ensure_ascii=False, default=str))
 
-    def receive(self, utt: LiveUtterance, background: bool = True) -> bool:
+    def receive(self, utt: LiveUtterance, background: bool = True) -> str:
+        """Add one utterance; returns the delivery status (ACCEPTED | DUPLICATE_SEQUENCE | DUPLICATE_TEXT | EMPTY)."""
         s = self.session(utt.meeting_id)
-        accepted = s.add(utt)
-        why_not = s.last_trigger_reason if accepted else "NOT_ACCEPTED"
+        with s.lock:  # add + its status, atomically (concurrent POSTs for the same meeting)
+            accepted = s.add(utt)
+            status = s.last_add_status
+        why_not = s.last_trigger_reason if accepted else status
         s.debug_state.update(last_speaker=utt.speaker, last_role=utt.role)
         self.dbg("RUNTIME", sequence=utt.sequence, speaker=utt.speaker, role=utt.role, accepted=accepted,
-                 text=utt.text)
+                 status=status, text=utt.text)
         busy = utt.meeting_id in self._busy
         self.dbg("TRIGGER", analyze=why_not is None, reason=why_not, busy=busy,
                  queued=why_not is None and busy, pending_lead=s.pending_lead_seq)
@@ -109,8 +125,32 @@ class Runtime:
             if background:
                 self._kick(s)
             else:
-                self.log(json.dumps(s.analyze()))
-        return accepted
+                self._done(s.analyze())
+        return status
+
+    def _done(self, t: dict[str, Any]) -> None:
+        """One finished analysis: timing line on stderr + model health from what actually happened."""
+        self.log(json.dumps(t))
+        if str(t.get("reason", "")).startswith("ERROR:OllamaError"):
+            self.model_state = "unavailable"
+        elif t.get("classifier_finished_at"):
+            self.model_state = "ready"
+
+    def health(self) -> dict[str, Any]:
+        """Runtime and model state only; never call data."""
+        return {"status": "ok" if self.model_state != "unavailable" else "degraded", "runtime": "ready",
+                "model": self.model, "model_state": self.model_state, "instance": self.instance}
+
+    def rehydrate(self, meeting_id: str, items: Any) -> dict[str, Any]:
+        """Rebuild a meeting's transcript after a restart; never analyzed (see LiveSalesSession.rehydrate)."""
+        if not isinstance(items, list):
+            raise TypeError("utterances must be a list")
+        now = time.time()
+        utts = [parse_utterance({**i, "meeting_id": meeting_id}, self.closer_names, now) for i in items]
+        s = self.session(meeting_id)
+        added = s.rehydrate(utts)
+        self.dbg("REHYDRATE", meeting_id=meeting_id, received=len(utts), added=added, utterances=len(s.utterances))
+        return {"rehydrated": added, "utterances": len(s.utterances), "instance": self.instance}
 
     def _kick(self, s: LiveSalesSession) -> None:
         with self._lock:
@@ -121,7 +161,7 @@ class Runtime:
         def work() -> None:
             try:
                 while True:
-                    self.log(json.dumps(s.analyze()))
+                    self._done(s.analyze())
                     with self._lock:
                         if not s.should_analyze():
                             self._busy.discard(s.meeting_id)
@@ -134,8 +174,12 @@ class Runtime:
         threading.Thread(target=work, daemon=True).start()
 
     def status(self, s: LiveSalesSession | None, rec: Any) -> str:
-        """Sidebar state: CAPTURING | ANALYZING | RECOMMENDATION_READY | NO_RECOMMENDATION | ERROR."""
-        if s is not None and (s.active_analysis is not None or s.meeting_id in self._busy):
+        """Dock state: CAPTURING | ANALYZING | RECOMMENDATION_READY | NO_RECOMMENDATION | ERROR.
+
+        Called under `s.lock` and derived only from session state, so it can never disagree with the
+        `active_analysis` / recommendation of the same snapshot (a lead line waiting for the worker counts
+        as ANALYZING)."""
+        if s is not None and (s.active_analysis is not None or s.pending_lead_seq is not None):
             return "ANALYZING"
         if rec is not None:
             return "RECOMMENDATION_READY"
@@ -151,7 +195,7 @@ class Runtime:
         the sidebar status and the last utterances exactly as the session received them."""
         s = self.sessions.get(meeting_id)
         if s is None:
-            view = {"state": "NONE", "status": "CAPTURING", "transcript": []}
+            view = {"state": "NONE", "status": "CAPTURING", "transcript": [], "instance": self.instance}
             if self.debug:
                 view["debug"] = {"session": False}
             return view
@@ -161,6 +205,7 @@ class Runtime:
             if rec is not None:
                 s.mark_displayed(rec.id)
             view["status"] = self.status(s, rec)
+            view["instance"] = self.instance
             view["active_analysis"] = s.active_analysis and dict(s.active_analysis)
             view["last_completed_analysis"] = s.last_completed_analysis and dict(s.last_completed_analysis)
             view["transcript"] = [{"role": u.role, "text": u.text, **({"speaker": u.speaker} if self.debug else {})}
@@ -169,7 +214,13 @@ class Runtime:
             if self._last_poll.get(meeting_id) != view["state"]:  # log changes only (polled every 0.5 s)
                 self._last_poll[meeting_id] = view["state"]
                 self.dbg("POLL", meeting_id=meeting_id, session=True, state=view["state"])
+            last = s.timings[-1] if s.timings else {}
             view["debug"] = {**s.debug_state, "session": True, "utterances": len(s.utterances),
+                             "latency": {k: last[k] for k in ("queue_wait_ms", "classifier_latency_ms",
+                                                              "guidance_latency_ms", "end_to_end_latency_ms",
+                                                              "displayed_latency_ms") if k in last},
+                             "counters": dict(s.counters), "analysis_error_reasons": dict(s.error_reasons),
+                             "model_state": self.model_state,
                              "recommendation_state": (s.current_recommendation.state
                                                       if s.current_recommendation else "NONE")}
         return view
@@ -198,14 +249,16 @@ def make_handler(runtime: Runtime) -> type[BaseHTTPRequestHandler]:
             if not (self.headers.get("Content-Type") or "").startswith("application/json"):
                 raise ValueError("Content-Type must be application/json")
             n = int(self.headers.get("Content-Length") or 0)
-            if n > _MAX_BODY:
+            if n > (_MAX_REHYDRATE_BODY if self.path == "/rehydrate" else _MAX_BODY):
                 raise ValueError("body too large")
             return json.loads(self.rfile.read(n) or b"null")
 
         def do_GET(self) -> None:
+            url = urlsplit(self.path)
+            if url.path == "/health":  # no call data: no header needed (curl, duplicate-runtime check)
+                return self._send(200, runtime.health())
             if not self._allowed():
                 return
-            url = urlsplit(self.path)
             if url.path != "/recommendation":
                 return self._send(404, {"error": "not found"})
             meeting_id = parse_qs(url.query).get("meeting_id", [""])[0]
@@ -219,9 +272,15 @@ def make_handler(runtime: Runtime) -> type[BaseHTTPRequestHandler]:
                 if self.path == "/live-utterance":
                     utt = parse_utterance(payload, runtime.closer_names, time.time())
                     runtime.dbg("CAPTION", speaker=utt.speaker, text=utt.text, sequence=utt.sequence)
-                    accepted = runtime.receive(utt)
-                    runtime.dbg("HTTP", request="POST /live-utterance", status=200, accepted=accepted)
-                    return self._send(200, {"accepted": accepted, "role": utt.role})
+                    status = runtime.receive(utt)
+                    runtime.dbg("HTTP", request="POST /live-utterance", status=200, delivery=status)
+                    return self._send(200, {"accepted": status == "ACCEPTED", "status": status,
+                                            "id": utt.sequence, "role": utt.role})
+                if self.path == "/rehydrate":
+                    meeting_id = payload.get("meeting_id")
+                    if not isinstance(meeting_id, str) or not meeting_id:
+                        raise ValueError("meeting_id must be a non-empty string")
+                    return self._send(200, runtime.rehydrate(meeting_id, payload.get("utterances")))
                 if self.path == "/dismiss":
                     runtime.session(str(payload.get("meeting_id", ""))).dismiss()
                     return self._send(200, {"ok": True})
@@ -252,15 +311,48 @@ def replay(runtime: Runtime, path: Path, delay: float) -> None:
         time.sleep(delay)
 
 
-def warm_up(ollama: OllamaClassificationProvider, log) -> None:
+class LiveHTTPServer(ThreadingHTTPServer):
+    """One runtime per port. Windows lets a second process bind a port that has SO_REUSEADDR (the
+    stdlib default here), and the extension then talks to whichever answers; an exclusive bind makes the
+    second runtime fail at start instead."""
+
+    allow_reuse_address = not sys.platform.startswith("win")
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):  # Windows
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def bind_or_explain(port: int, handler: type[BaseHTTPRequestHandler]) -> LiveHTTPServer:
+    """The server, or SystemExit with a clear message when the port is taken."""
+    try:
+        return LiveHTTPServer(("127.0.0.1", port), handler)
+    except OSError as exc:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as r:
+                ours = bool(json.loads(r.read()).get("runtime"))
+        except (OSError, ValueError):
+            ours = False
+        who = "AI Closer runtime already running" if ours else "port already in use by another process"
+        raise SystemExit(f"ERROR: {who} on 127.0.0.1:{port} ({exc.strerror or exc}). "
+                         "Stop it first; only one runtime may serve the extension.") from exc
+
+
+def warm_up(ollama: OllamaClassificationProvider, log, runtime: Runtime | None = None) -> None:
     """Load the model (same options as the analyses) before the first objection: a cold load measured
     6.7-23 s on the RTX 4050 test machine, all of it otherwise added to the first recommendation."""
     t0 = time.time()
     try:
         ollama.classify('Return {"ok": true} as JSON.')
+        if runtime is not None:
+            runtime.model_state = "ready"
         log(json.dumps({"warm_up_ms": round((time.time() - t0) * 1000),
                         "load_ms": round(ollama.last_usage.get("load_duration", 0) / 1e6)}))
     except (OllamaError, ValueError) as exc:  # never blocks serving; the first analysis reports the real error
+        if runtime is not None:
+            runtime.model_state = "unavailable"
         log(json.dumps({"warm_up_error": f"{type(exc).__name__}: {exc}"}))
 
 
@@ -294,8 +386,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.replay:
         replay(runtime, a.replay, a.delay)
         return 0
-    server = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(runtime))
-    threading.Thread(target=warm_up, args=(ollama, runtime.log), daemon=True).start()
+    server = bind_or_explain(a.port, make_handler(runtime))
+    threading.Thread(target=warm_up, args=(ollama, runtime.log, runtime), daemon=True).start()
     print(f"AI Closer live runtime on http://127.0.0.1:{a.port} ({a.model}, {a.arm}, num_ctx {a.num_ctx})"
           f" closer names: {sorted(runtime.closer_names)}{' [DEBUG]' if a.debug else ''}", file=sys.stderr, flush=True)
     try:

@@ -1,76 +1,156 @@
-// AI Closer — what the sidebar shows, as a pure function of the runtime's GET /recommendation answer.
-// No DOM, no Meet knowledge, node-testable. Every text comes from the runtime: the transcript is
-// what LiveSalesSession accepted, the recommendation is the runtime's CommercialGuidance view.
+// AI Closer — what the dock shows, as pure functions of the runtime's GET /recommendation answer.
+// No DOM, no Meet knowledge, node-testable. Every text comes from the runtime: the history is what
+// LiveSalesSession accepted, the suggestion is the runtime's grounded CommercialGuidance view.
+//
+// dockView(data, ctx)       -> tone + status, suggestion, analyzing/detected line, history, advanced lines
+// dockReducer(state, action) -> which panel is open (one at a time), badge and "Nova sugestão" toast
 
-const SIDEBAR_STATUS = {
-  CAPTURING: { text: "Capturando", color: "#1e8e3e" },
-  ANALYZING: { text: "Analisando fala do lead…", color: "#f9ab00" },
-  RECOMMENDATION_READY: { text: "Recomendação pronta", color: "#1a73e8" },
-  NO_RECOMMENDATION: { text: "Sem objeção para recomendar", color: "#5f6368" },
-  ERROR: { text: "Erro na análise", color: "#d93025" },
+// The four states the closer sees (Meet's dark palette). Nothing else is colored.
+const TONES = {
+  idle: "#9aa0a6", // gray: offline, captions off, error
+  listening: "#fdd663", // yellow: listening
+  analyzing: "#fdd663", // yellow: analyzing a lead line
+  objection: "#f28b82", // red: objection detected, suggestion not ready yet
+  ready: "#8ab4f8", // blue: suggestion ready
 };
 const ROLE_LABEL = { lead: "Lead", closer: "Closer", unknown: "?" };
+const PANELS = ["suggestion", "history", "advanced"];
+const TOAST_MS = 4000;
+const HISTORY_LINES = 8;
 
 /**
  * data: the runtime answer (or null when it is unreachable).
- * ctx: { runtimeOk, captionsOn, counters: {captions_seen, utterances_sent, utterances_failed}, meetingId }
+ * ctx: { runtimeOk, captionsOn, meetingId, health: {model_state}|null,
+ *        counters: {captions_seen}, delivery: UtteranceDelivery (counters, attemptErrors, lostReasons, inFlight) }
  */
-function sidebarView(data, ctx) {
+function dockView(data, ctx) {
   const d = data || {};
   const debug = Boolean(d.debug);
-  let status;
-  if (!ctx.runtimeOk) status = { ...SIDEBAR_STATUS.ERROR, text: "Runtime offline" };
-  else if (!ctx.captionsOn) status = { ...SIDEBAR_STATUS.CAPTURING, text: "Ative as legendas (CC)", color: "#5f6368" };
-  else status = SIDEBAR_STATUS[d.status] || SIDEBAR_STATUS.CAPTURING;
+  const a = d.active_analysis || null;
+  const rec = d.state === "ACTIVE"
+    ? { id: d.id, said: d.lead_said, question: d.question, objective: d.objective || null, label: d.label }
+    : null;
+  const analyzing = a ? { text: a.text_preview } : null;
+  const detected = a && a.detected_category ? { label: a.label || a.detected_category } : null;
 
-  const transcript = (d.transcript || []).map((u) => ({
+  let tone, status;
+  if (!ctx.runtimeOk) [tone, status] = ["idle", "Runtime offline"];
+  else if (ctx.health && ctx.health.model_state === "unavailable") [tone, status] = ["idle", "Modelo indisponível"];
+  else if (!ctx.captionsOn) [tone, status] = ["idle", "Ative as legendas (CC)"];
+  else if (detected) [tone, status] = ["objection", "Objeção detectada"];
+  else if (a || d.status === "ANALYZING") [tone, status] = ["analyzing", "Analisando…"];
+  else if (rec) [tone, status] = ["ready", "Sugestão pronta"];
+  else if (d.status === "ERROR") [tone, status] = ["idle", "Erro na análise"];
+  else [tone, status] = ["listening", "Ouvindo"];
+
+  const history = (d.transcript || []).slice(-HISTORY_LINES).map((u) => ({
     who: debug && u.speaker ? `${u.speaker} → ${u.role}` : ROLE_LABEL[u.role] || "?",
     role: u.role,
     text: u.text,
   }));
 
-  // The analysis running NOW (its own utterance), never mixed with the last finished one.
-  const a = d.active_analysis;
-  const analyzing = a ? { who: ROLE_LABEL[a.role] || "?", text: a.text_preview, segment: a.segment_id } : null;
-
-  // Seller-facing card: what the lead said + what to say now (+ a small objective). Codes, ids and
-  // the rationale stay in the debug lines.
-  const rec = d.state === "ACTIVE"
-    ? { id: d.id, said: d.lead_said, question: d.question, objective: d.objective || null, label: d.label }
+  // Delivery problems are never silent: a lost utterance shows a small warning in the dock.
+  const dl = ctx.delivery || null;
+  const lost = dl ? dl.counters.lost : 0;
+  const warning = lost
+    ? { count: lost, text: `${lost} ${lost === 1 ? "fala não entregue" : "falas não entregues"} ao runtime` }
     : null;
 
-  let debugLines = null;
+  // Advanced panel: basic status always; technical data only when the runtime runs with --debug.
+  const basic = [
+    `Runtime: ${ctx.runtimeOk ? "online" : "offline"}${ctx.health ? ` · modelo: ${ctx.health.model_state}` : ""}`,
+    `Legendas: ${ctx.captionsOn ? "ligadas" : "desligadas"}`,
+    `Status: ${status}`,
+  ];
+  if (warning) basic.push(`Atenção: ${warning.text}`);
+  let technical = null;
   if (debug) {
     const c = ctx.counters;
-    debugLines = [
-      `runtime: ${ctx.runtimeOk ? "online" : "offline"} · status: ${d.status || "-"}`,
-      `captions_seen: ${c.captions_seen} · utterances_sent: ${c.utterances_sent} (failed ${c.utterances_failed})`,
-      `runtime_utterances: ${d.debug.utterances ?? "-"}`,
-      `last: ${d.debug.last_speaker || "-"} → ${d.debug.last_role || "-"}`,
-      `recommendation_state: ${d.debug.recommendation_state || "-"}`,
-    ];
-    if (analyzing) debugLines.push(`active_segment: ${analyzing.segment}`);
     const l = d.last_completed_analysis;
-    debugLines.push("", "ÚLTIMA ANÁLISE CONCLUÍDA");
-    if (l) {
-      debugLines.push(`category: ${l.category || "-"}`, `outcome: ${l.outcome}`, `reason: ${l.reason}`,
-        `segment: ${l.segment_id || "-"}`);
-    } else debugLines.push("(nenhuma ainda)");
-    debugLines.push("");
+    const lat = d.debug.latency || {};
+    const k = (dl && dl.counters) || {};
+    const rc = d.debug.counters || {};
+    const kv = (o) => Object.entries(o).map(([a, b]) => `${a}=${b}`).join(", ") || "-";
+    technical = [
+      `status: ${d.status || "-"} · recommendation_state: ${d.debug.recommendation_state || "-"}`,
+      `runtime_utterances: ${d.debug.utterances ?? "-"} · last: ${d.debug.last_speaker || "-"} → ${d.debug.last_role || "-"}`,
+      "", "ENTREGA (extensão)",
+      `captions_seen: ${c.captions_seen ?? "-"} · utterances_created: ${k.created ?? "-"}`,
+      `utterances_sent: ${k.sent ?? "-"} · utterances_accepted: ${k.confirmed ?? "-"} · utterances_retried: ${k.retried ?? "-"}`,
+      `duplicates_suppressed: ${k.duplicates ?? "-"} · utterances_rejected: ${k.rejected ?? "-"} · utterances_failed: ${k.lost ?? "-"}`,
+      `in_flight: ${dl ? dl.inFlight : "-"}`,
+      `attempt_errors: ${dl ? kv(dl.attemptErrors) : "-"}`,
+      `failed_reasons: ${dl ? kv(dl.lostReasons) : "-"}`,
+      `recovery: ${ctx.rehydrator ? kv(ctx.rehydrator.counters) : "-"}`,
+      "", "RUNTIME",
+      `received: ${rc.received ?? "-"} · accepted: ${rc.accepted ?? "-"} · duplicates_suppressed: ${rc.duplicates_suppressed ?? "-"} · rejected: ${rc.rejected ?? "-"} · rehydrated: ${rc.rehydrated ?? "-"}`,
+      `analyses_started: ${rc.analyses_started ?? "-"} · analyses_completed: ${rc.analyses_completed ?? "-"} · analysis_errors: ${rc.analysis_errors ?? "-"}`,
+      `recommendations_created: ${rc.recommendations_created ?? "-"} · model_state: ${d.debug.model_state || "-"}`,
+      `analysis_error_reasons: ${kv(d.debug.analysis_error_reasons || {})}`,
+    ];
+    if (a) technical.push(`active_segment: ${a.segment_id}${a.detected_category ? ` · ${a.detected_category}` : ""}`);
     if (rec) {
-      debugLines.push(
-        `category: ${d.category}`,
-        `knowledge_unit: ${d.knowledge_unit}`,
-        `move: ${d.move_code || "-"} (${d.move_id})`,
-        `grade: ${d.grade}`,
-        `grounding: ${d.grounding}`,
-        `action: ${d.move}`,
-        `rationale: ${d.rationale}`,
-      );
+      technical.push("", "RECOMENDAÇÃO ATIVA", `category: ${d.category}`, `knowledge_unit: ${d.knowledge_unit}`,
+        `move: ${d.move_code || "-"} (${d.move_id})`, `grade: ${d.grade}`, `grounding: ${d.grounding}`,
+        `action: ${d.move}`, `rationale: ${d.rationale}`);
     }
-    debugLines.push(`meeting_id: ${ctx.meetingId}`);
+    technical.push("", "ÚLTIMA ANÁLISE CONCLUÍDA");
+    if (l) {
+      technical.push(`category: ${l.category || "-"}`, `outcome: ${l.outcome}`, `reason: ${l.reason}`,
+        `segment: ${l.segment_id || "-"}`);
+    } else technical.push("(nenhuma ainda)");
+    const ms = ["queue_wait_ms", "classifier_latency_ms", "guidance_latency_ms", "end_to_end_latency_ms",
+      "displayed_latency_ms"].filter((k) => k in lat).map((k) => `${k}: ${lat[k]}`);
+    if (ms.length) technical.push("", "LATÊNCIA (última análise)", ...ms);
+    technical.push("", `meeting_id: ${ctx.meetingId}`);
   }
-  return { status, transcript, analyzing, rec, debugLines };
+
+  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, technical } };
 }
 
-if (typeof module !== "undefined") module.exports = { sidebarView, SIDEBAR_STATUS };
+const DOCK_INITIAL = Object.freeze({ open: null, seenRecId: null, notifiedRecId: null, toastUntil: 0 });
+
+/**
+ * UI state of the dock. Actions:
+ *  {type: "toggle", panel, recId?}  open that panel (closing any other) or close it if already open
+ *  {type: "close"}                  close the open panel (the dock stays)
+ *  {type: "data", recId, now}       new runtime answer: a new recommendation gets a badge + a short toast,
+ *                                   unless the Suggestion panel is already open (then it just updates)
+ *  {type: "dismiss", recId}         the closer dismissed it: close the panel, no badge for it
+ */
+function dockReducer(state, action) {
+  const s = state || DOCK_INITIAL;
+  switch (action.type) {
+    case "toggle": {
+      if (!PANELS.includes(action.panel)) return s;
+      const open = s.open === action.panel ? null : action.panel;
+      const seen = open === "suggestion" && action.recId != null ? action.recId : s.seenRecId;
+      return { ...s, open, seenRecId: seen, toastUntil: open === "suggestion" ? 0 : s.toastUntil };
+    }
+    case "close":
+      return { ...s, open: null };
+    case "data": {
+      if (action.recId == null || action.recId === s.seenRecId) return s;
+      if (s.open === "suggestion") return { ...s, seenRecId: action.recId, notifiedRecId: action.recId };
+      if (action.recId === s.notifiedRecId) return s;
+      return { ...s, notifiedRecId: action.recId, toastUntil: action.now + TOAST_MS };
+    }
+    case "dismiss":
+      return { ...s, open: s.open === "suggestion" ? null : s.open, seenRecId: action.recId ?? s.seenRecId,
+        toastUntil: 0 };
+    default:
+      return s;
+  }
+}
+
+/** Dock highlight for this moment: `active` (blue Sugestão button) while a recommendation is ACTIVE;
+ * `badge` and `toast` only while the closer has not opened it yet. */
+function dockChrome(state, view, now) {
+  const active = Boolean(view.rec);
+  const unseen = active && view.rec.id !== state.seenRecId;
+  return { active, badge: unseen, toast: unseen && now < state.toastUntil };
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { dockView, dockReducer, dockChrome, DOCK_INITIAL, TONES, TOAST_MS };
+}

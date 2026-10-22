@@ -213,10 +213,25 @@ def _usage(provider: Any) -> dict[str, Any]:
     inner = getattr(provider, "inner", provider)  # ContextGuard wraps the Ollama provider
     u = getattr(inner, "last_usage", {}) or {}
     out = {"prompt_tokens": u.get("prompt_eval_count"), "output_tokens": u.get("eval_count")}
+    if u.get("done_reason"):  # "length" = generation cut by the context window (truncated output)
+        out["done_reason"] = u["done_reason"]
     for k in ("load", "prompt_eval", "eval", "total"):  # Ollama reports nanoseconds
         if isinstance(u.get(f"{k}_duration"), int):
             out[f"ollama_{k}_ms"] = round(u[f"{k}_duration"] / 1e6)
     return out
+
+
+def error_type(exc: BaseException) -> str:
+    """Technical analysis error -> one type (reliability taxonomy). Never a fail-closed rejection."""
+    if isinstance(exc, OllamaError):
+        cause = exc.__cause__
+        cause = getattr(cause, "reason", cause)  # urllib.error.URLError wraps the socket error
+        return "OLLAMA_TIMEOUT" if isinstance(cause, TimeoutError) or "timed out" in str(exc) else "OLLAMA_ERROR"
+    if isinstance(exc, MalformedResponseError):
+        return "INVALID_JSON" if str(exc).startswith("model output is") else "SCHEMA_VALIDATION"
+    if isinstance(exc, InputTooLargeError):
+        return "INPUT_TOO_LARGE"
+    return "OTHER"
 
 
 @dataclass
@@ -246,6 +261,14 @@ class LiveSalesSession:
     active_analysis: dict[str, Any] | None = None
     last_completed_analysis: dict[str, Any] | None = None
     _next_id: int = 1
+    last_add_status: str | None = None  # why the latest add() did or did not insert (delivery contract)
+    error_reasons: dict[str, int] = field(default_factory=dict)  # technical analysis errors by error_type
+    error_examples: dict[str, str] = field(default_factory=dict)  # error_type -> first message (no call text)
+    # Reliability counters (technical only, no text): delivery into the session and analysis lifecycle.
+    counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
+        "received", "accepted", "duplicates_suppressed", "rejected", "rehydrated", "analyses_started",
+        "analyses_completed",
+        "analysis_errors", "recommendations_created"), 0))
     _short_ids: dict[int, str] = field(default_factory=dict)
     lock: threading.RLock = field(default_factory=threading.RLock)
     # Temporary debug for the first real-Meet tests (`--debug`): stage log + last-event summary for the panel.
@@ -259,13 +282,22 @@ class LiveSalesSession:
     # --- input --------------------------------------------------------------------------------
 
     def add(self, utt: LiveUtterance) -> bool:
-        """Insert in sequence order. False (ignored) for a repeated sequence or a repeated caption."""
+        """Insert in sequence order. False (ignored) for a repeated sequence or a repeated caption.
+
+        Idempotent per `sequence` (the utterance id): a retry of an utterance already here is answered
+        DUPLICATE_SEQUENCE and changes nothing. `last_add_status` says why: ACCEPTED | DUPLICATE_SEQUENCE |
+        DUPLICATE_TEXT (same speaker repeated the same caption) | EMPTY."""
         with self.lock:
-            if any(u.sequence == utt.sequence for u in self.utterances) or not utt.text.strip():
-                return False
+            self.counters["received"] += 1
+            if any(u.sequence == utt.sequence for u in self.utterances):
+                return self._refuse("DUPLICATE_SEQUENCE")
+            if not utt.text.strip():
+                return self._refuse("EMPTY")
             recent = self.utterances[-3:]
             if any(u.speaker == utt.speaker and _norm(u.text) == _norm(utt.text) for u in recent):
-                return False
+                return self._refuse("DUPLICATE_TEXT")
+            self.counters["accepted"] += 1
+            self.last_add_status = "ACCEPTED"
             i = len(self.utterances)
             while i and self.utterances[i - 1].sequence > utt.sequence:
                 i -= 1
@@ -277,6 +309,39 @@ class LiveSalesSession:
                     self._superseded += 1
                 self.pending_lead_seq = utt.sequence
             return True
+
+    def rehydrate(self, utts: list[LiveUtterance]) -> int:
+        """Restore utterances this meeting already had before a runtime restart (sent back by the extension).
+
+        Context only: they go into the transcript/window in sequence order, but never trigger or queue an
+        analysis, never touch the recommendation and are not counted as live delivery. Idempotent per
+        sequence. Returns how many were added."""
+        with self.lock:
+            added = []
+            for utt in sorted(utts, key=lambda u: u.sequence):
+                if not utt.text.strip() or any(u.sequence == utt.sequence for u in self.utterances):
+                    continue
+                i = len(self.utterances)
+                while i and self.utterances[i - 1].sequence > utt.sequence:
+                    i -= 1
+                self.utterances.insert(i, utt)
+                self._short_ids[utt.sequence] = f"seg_{len(self._short_ids) + 1}"
+                added.append(utt)
+            if added:
+                # already seen by the previous runtime: never analyzed again as new lines
+                self._last_analyzed_seq = max(self._last_analyzed_seq, max(u.sequence for u in added))
+                if self.pending_lead_seq is not None and self.pending_lead_seq <= self._last_analyzed_seq:
+                    self.pending_lead_seq = None
+                leads = [u for u in added if u.role == "lead"]
+                if leads and leads[-1].sequence == self._last_analyzed_seq:
+                    self._last_analyzed_lead = _norm(leads[-1].text)  # repeat suppression keeps working
+            self.counters["rehydrated"] += len(added)
+            return len(added)
+
+    def _refuse(self, status: str) -> bool:
+        self.last_add_status = status
+        self.counters["rejected" if status == "EMPTY" else "duplicates_suppressed"] += 1
+        return False
 
     def _trigger_reason(self, utt: LiveUtterance) -> str | None:
         """Only this NEW lead utterance can trigger: None = it becomes the pending analysis, else why not."""
@@ -380,6 +445,8 @@ class LiveSalesSession:
             if trigger:
                 self._last_analyzed_lead = _norm(trigger.text)
             started = self.clock()
+            if trigger is not None:
+                self.counters["analyses_started"] += 1
             self.active_analysis = None if trigger is None else {
                 "sequence": trigger.sequence, "segment_id": self._sid(trigger.sequence), "speaker": trigger.speaker,
                 "role": trigger.role, "text_preview": trigger.text[:140], "started_at": started}
@@ -395,6 +462,12 @@ class LiveSalesSession:
             outcome, reason = self._decide(window, new_seqs, t)
         except (OllamaError, MalformedResponseError, InputTooLargeError) as exc:  # live: no recommendation, no crash
             outcome, reason = "NO_RECOMMENDATION", f"ERROR:{type(exc).__name__}"
+            t.update(error_type=error_type(exc), error_detail=str(exc)[:200], error_usage=_usage(self.provider),
+                     error_stage="guidance" if t.get("policy_finished_at") else "classifier")
+        except Exception as exc:  # noqa: BLE001 - any other failure must still finish the analysis below,
+            # or active_analysis stays set and the dock shows "Analisando..." forever
+            outcome, reason = "NO_RECOMMENDATION", f"ERROR:UNEXPECTED:{type(exc).__name__}"
+            t.update(error_type="OTHER", error_detail=f"{type(exc).__name__}: {exc}"[:200])
         t.update(outcome=outcome, reason=reason)
         new_rec = t.pop("_new_rec", None)
         # Queue wait and inference are reported separately (never mixed).
@@ -422,6 +495,14 @@ class LiveSalesSession:
                 "category": t.get("category"), "outcome": outcome, "reason": reason, "finished_at": self.clock()}
             self.active_analysis = None
             self.timings.append(t)
+            if t["sequence"] is not None:
+                self.counters["analyses_completed"] += 1
+                self.counters["analysis_errors"] += reason.startswith("ERROR:")
+                if reason.startswith("ERROR:"):
+                    et = t.get("error_type", "OTHER")
+                    self.error_reasons[et] = self.error_reasons.get(et, 0) + 1
+                    self.error_examples.setdefault(et, t.get("error_detail", ""))
+                self.counters["recommendations_created"] += new_rec is not None
         self._dbg("POLICY" if outcome != "RECOMMENDED" else "STATE", outcome=outcome, reason=reason,
                   segment=self.last_completed_analysis["segment_id"],
                   recommendation=(self.current_recommendation.state if self.current_recommendation else "NONE"))
@@ -431,7 +512,8 @@ class LiveSalesSession:
         if not new_seqs:
             return "NO_RECOMMENDATION", "NO_PENDING_LEAD_UTTERANCE"
         call = self._window_call(window)
-        run = classify_call(call, self.config.arm, self.provider, self.classification_kb)
+        # structured: the classifier's own output schema, enforced by Ollama (see CLASSIFIER_SCHEMA)
+        run = classify_call(call, self.config.arm, self.provider, self.classification_kb, structured=True)
         t.update(classifier_finished_at=self.clock(), classifier=_usage(self.provider),
                  episodes=len(run.episodes))
         self._dbg("CLASSIFIER", detection=run.call_detection, validation_errors=list(run.validation_errors),
@@ -487,6 +569,10 @@ class LiveSalesSession:
         self._dbg("POLICY", emit=True, category=episode.category, anchor=episode.objection_segment_ids[0],
                   objection_evidence=list(episode.objection_segment_ids), factual_evidence=list(factual))
         t["policy_finished_at"] = self.clock()
+        with self.lock:  # UI only: the objection is known before its guidance is ready ("Objeção detectada")
+            if self.active_analysis is not None:
+                self.active_analysis.update(detected_category=episode.category,
+                                            label=LABELS.get(episode.category, episode.category))
         # live: one-sentence rationale (debug-only in the sidebar) + schema-enforced shape; see guide_episode
         guidance = guide_episode(call, guidance_episode, self.knowledge, self.provider, live=True)
         t.update(guidance_finished_at=self.clock(), guidance=_usage(self.provider))
@@ -495,6 +581,11 @@ class LiveSalesSession:
         self._dbg("GROUNDING", valid=not any("ungrounded" in e for e in guidance.errors),
                   errors=[e for e in guidance.errors if "ungrounded" in e])
         if guidance.status != "GUIDED":
+            # fail-closed, not a technical error: grounding rejected an invented fact, or the answer broke
+            # the guidance contract (wrong keys/ids/move)
+            if guidance.status == "INVALID_RESPONSE":
+                t["guidance_rejection"] = ("GROUNDING_REJECTED" if all("ungrounded" in e for e in guidance.errors)
+                                           else "GUIDANCE_INVALID")
             return "NO_RECOMMENDATION", f"GUIDANCE_{guidance.status}"
         with self.lock:  # built here, made current by analyze() in the same swap as last_completed_analysis
             g = guidance.generated_guidance

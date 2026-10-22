@@ -51,7 +51,7 @@ LiveSalesSession: utterances → rolling window → trigger → classify_call (E
                   → guide_episode (exact-category knowledge + grounding, fail closed) → one recommendation
                                                                                   │ GET /recommendation (0.5 s poll)
                                                                                   ▼
-                                     sidebar on the Meet tab (shadow DOM): transcript + recommendation
+                                     dock on the Meet tab (shadow DOM): suggestion + history + advanced
 ```
 
 What is reused unchanged: the classifier (`classify_call`, `validate_predictions`, E0/E1/E2), the 8
@@ -65,8 +65,8 @@ What is new: `src/closer_ai/live/` (session + server) and `extensions/google-mee
 |---|---|---|
 | MeetCaptionAdapter | `extensions/google-meet/meet_adapter.js` | The only code that knows Meet's DOM. Selectors live in `SELECTORS`, with structural fallbacks. A speaker it cannot read is `unknown`. |
 | CaptionTracker | same file (pure, no DOM) | Emits a caption block once it has been stable for 1.5 s, or when it disappears. Only new words when a block keeps growing. Never emits the same text twice. Sequence is monotonic. |
-| content.js | `extensions/google-meet/content.js` | Wiring: scans captions every 0.5 s, polls the runtime every 0.5 s, draws the sidebar. Nothing is stored in the browser. |
-| sidebarView | `extensions/google-meet/sidebar_view.js` | Pure: runtime answer → what the sidebar shows (status, transcript lines, recommendation, debug lines). Never adds text of its own. |
+| content.js | `extensions/google-meet/content.js` | Wiring: scans captions every 0.5 s, polls the runtime every 0.5 s, draws the dock and its panels, keeps it above the captions. Nothing is stored in the browser. |
+| dockView / dockReducer | `extensions/google-meet/sidebar_view.js` | Pure: runtime answer → what the dock shows (tone, status, suggestion, history, advanced lines); which panel is open, badge and toast. Never adds text of its own. |
 | background.js | `extensions/google-meet/background.js` | Relays requests to `127.0.0.1:8765`, allowed by `host_permissions` (not by the page's CORS). |
 | Runtime | `src/closer_ai/live/server.py` | `POST /live-utterance`, `GET /recommendation`, `POST /dismiss`. One analysis thread per meeting, single flight. Also replays a synthetic stream. |
 | LiveSalesSession | `src/closer_ai/live/session.py` | In-memory state, rolling window, trigger, emission policy, recommendation lifecycle, latency timings. |
@@ -120,29 +120,47 @@ What is new: `src/closer_ai/live/` (session + server) and `extensions/google-mee
   reuses one block per speaking turn and keeps growing its text). `utterances_sent` = utterances the
   tracker emitted and the runtime answered (closer and lead; each stable stretch of a growing block
   is one utterance). So `captions_seen: 2, utterances_sent: 5` is normal.
-- **Sidebar** (right side, above Meet's controls; "–" minimizes). Order, top to bottom (v1):
-  1. **Cliente disse**: the lead's objection words, verbatim (`lead_said`);
-  2. **Sugestão**: what to say now (CommercialGuidance's grounded `suggested_question`), the largest
-     text on the panel; under it, small, `Objetivo: <move>` (`objective`) and the objection label;
-  3. "Analisando agora" while a lead line is being analyzed;
-  4. the transcript, smaller (context only);
-  5. the debug section, only with `--debug`.
+- **Dock** (bottom left, above Meet's control bar; dark theme). Always visible and small:
+  `[● status] [Sugestão] [Histórico] [•••]`. Each button opens one panel above the dock; only one
+  panel is open at a time, the same button or "–" closes it, and nothing opens on its own.
+  - **Sugestão**, in order of visual weight: what to say now (`suggested_question`, the largest
+    text), what the client said (`lead_said`, small, above it), `Objetivo: <move>` (`objective`), the
+    objection label and "Dispensar". While a lead line is analyzed it shows "Analisando: “…”"
+    (yellow); once the policy has a category and the guidance is still running, "Objeção detectada ·
+    <label>" (red dot only). With no active recommendation: "Nenhuma sugestão ativa.";
+  - **Histórico**: the last 8 utterances as the runtime accepted them, Closer and Lead labeled, the
+    lead's lines brighter, internal scroll;
+  - **•••** (Avançado): runtime online/offline, captions on/off and status; with `--debug` also the
+    category code, knowledge unit, move, grade, grounding, recommendation state, active segment,
+    last completed analysis, last latencies, counters and meeting id. Never opens by itself.
+  - States (dot + status text): gray = offline / captions off / error; yellow = "Ouvindo" and
+    "Analisando…"; red = "Objeção detectada"; blue = "Sugestão pronta". Only the dot, one label and
+    the Sugestão button are colored.
+  - A new ACTIVE recommendation does not open a panel: the Sugestão button turns blue with a dot
+    and "Nova sugestão" shows for 4 s. If the Sugestão panel is already open it just updates. After
+    the closer opens it, the button stays blue (reopen any time) until the recommendation is
+    replaced, expires or is dismissed; then the highlight goes away and the history stays.
+  - Placement: if Meet's captions reach the dock's column (small windows, long captions), the dock
+    moves up above them; panels shrink to the window height. Chat and the right-side controls are on
+    the other side.
 
   Not shown to the seller by default: category code, knowledge unit, move id, grade, grounding,
-  segment ids, rationale. All of them stay in the debug section. Everything comes from one
+  segment ids, rationale, latencies. Everything comes from one
   `GET /recommendation` (polled every 0.5 s):
   - `transcript`: the last 8 utterances *as LiveSalesSession accepted them* (`Lead:` / `Closer:`;
     with `--debug`, `raw speaker → role`). A caption that did not reach the session is not shown;
   - `status`: `CAPTURING | ANALYZING | RECOMMENDATION_READY | NO_RECOMMENDATION | ERROR`;
   - `active_analysis` (the lead line being analyzed now: sequence, segment_id, speaker, role,
-    text_preview, started_at; shown as "Analisando agora") and `last_completed_analysis` (sequence,
+    text_preview, started_at, and `detected_category`/`label` once the policy decided to emit, before
+    the guidance is ready; shown as "Analisando" / "Objeção detectada") and `last_completed_analysis` (sequence,
     segment_id, category, outcome, reason, finished_at; debug "Última análise concluída"). Kept apart
     so an old result is never read as the current line's; a finished analysis swaps both and the
     recommendation under one lock;
   - the active recommendation: `lead_said`, `question`, `objective`, `label`; plus, for debug,
     `category`, `move` (action line), `rationale`, `knowledge_unit`, `move_id`/`move_code`, `grade`,
     `grounding`. Never the whole unit;
-  - with `--debug`: those technical fields, counters, `active_segment`, the last completed analysis.
+  - with `--debug`: those technical fields, counters, `active_segment`, the last completed analysis
+    and `debug.latency` (the last analysis' queue/classifier/guidance/end-to-end/displayed ms).
 - **Latency:** one JSON line per analysis on stderr, technical fields only: sequence, timestamps,
   outcome/reason, category, prompt/output tokens.
   - `queue_wait_ms` = lead caption received → its analysis started (waiting for a running analysis);
@@ -218,6 +236,165 @@ Tested and **not** applied:
 Seller-perceived time also includes the browser's 1.5 s caption-stability wait (unchanged: a shorter
 wait splits sentences mid-way in Meet's self-revising captions; not measured in a real meeting).
 
+## Reliability (P0)
+
+### Why the dock showed `failed: 4`
+
+Before P0, `utterances_failed` was incremented in `content.js` once per utterance whose single send
+did not come back `ok`. Each utterance was sent exactly once, never retried, so every `failed` was an
+utterance **lost for good, without saying why**. The ways to get there:
+- `background.js`: `fetch` rejected (nothing on 127.0.0.1:8765, e.g. the runtime was being restarted
+  while the Meet tab stayed open), or the body was not JSON (another program on the port);
+- `chrome.runtime.sendMessage` answered nothing (background service worker restarting).
+
+Two more holes: an HTTP 400 from the runtime was counted as *sent* (its body is JSON), and after the
+extension was reloaded under an open tab `sendMessage` throws, so the utterance was neither sent nor
+failed. There was no fetch timeout. Any lost line can be a lead objection.
+
+### Delivery contract
+
+`utterance -> id (sequence, unique per tab) -> sent -> one terminal state`, in `delivery.js`:
+
+| Terminal state | Meaning |
+|---|---|
+| CONFIRMED | runtime answered `ACCEPTED` |
+| DUPLICATE | runtime answered `DUPLICATE_SEQUENCE` (a retry of something it already has) or `DUPLICATE_TEXT` (same caption repeated by the same speaker): delivered, never added twice |
+| REJECTED | runtime refused it (`EMPTY`, HTTP 4xx); not retried |
+| LOST | not delivered, with a reason: `<error>:RETRIES_EXHAUSTED`, `TOO_OLD`, `QUEUE_OVERFLOW`, `EXTENSION_CONTEXT_INVALIDATED` |
+
+Attempt errors (classified by `background.js` / `content.js`, never lumped): `RUNTIME_UNAVAILABLE`,
+`HTTP_TIMEOUT` (3 s), `HTTP_<5xx>`, `INVALID_RESPONSE`, `EXTENSION_UNAVAILABLE` (retried);
+`REJECTED:HTTP_<4xx>`, `REJECTED:EMPTY`, `EXTENSION_CONTEXT_INVALIDATED` (terminal). Caption capture
+itself is reported as state (`Ative as legendas (CC)` when the captions region is missing).
+
+Invariant (tested): `created = confirmed + duplicates + rejected + lost + in_flight`.
+
+- **Retry:** same id, at most 4 attempts, backoff 0.5 / 1 / 2 s, given up after 10 s or when more
+  than 20 utterances are pending (oldest first). Each utterance is sent independently, so a line being
+  retried never delays a newer one; the runtime only analyzes the newest lead line anyway.
+- **Idempotency (runtime):** `(meeting_id, sequence)`; a repeated id answers `DUPLICATE_SEQUENCE` and
+  changes nothing. `POST /live-utterance` returns `{accepted, status, id, role}`.
+- **Never silent:** a LOST utterance shows `⚠ N` in the dock (tooltip "N falas não entregues ao
+  runtime") and a line in the ••• panel; with `--debug` the panel lists counters and reasons.
+
+### Other P0 fixes
+
+- **One runtime per port:** exclusive bind on Windows (`SO_EXCLUSIVEADDRUSE`; Windows otherwise let a
+  second process bind 8765 and the extension talked to whichever answered). The second runtime exits
+  with `ERROR: AI Closer runtime already running on 127.0.0.1:8765 (...)`.
+- **`GET /health`** (no header, no call data): `{"status", "runtime", "model", "model_state"}`;
+  `model_state` is `unknown | ready | unavailable`, from the warm-up and every analysis. The dock
+  polls it every 5 s: `Runtime offline` vs `Modelo indisponível`.
+- **Consistent snapshot:** the `GET /recommendation` status is derived only from session state under
+  the session lock (a lead line waiting for the worker counts as ANALYZING); the extension keeps one
+  GET in flight at a time, so an older answer never overwrites a newer one.
+- **Never stuck analyzing:** any unexpected error inside an analysis ends it as
+  `NO_RECOMMENDATION / ERROR:UNEXPECTED:<type>`; `active_analysis` is always cleared.
+- **Counters** (debug): extension `captions_seen, utterances_created, utterances_sent,
+  utterances_accepted, utterances_retried, duplicates_suppressed, utterances_rejected,
+  utterances_failed, in_flight, attempt_errors, failed_reasons`; runtime `received, accepted,
+  duplicates_suppressed, rejected, analyses_started, analyses_completed, analysis_errors,
+  recommendations_created, model_state`.
+
+### Session recovery after a runtime restart
+
+Real Meet (2026-10-22): after a 2–3 s runtime restart the extension delivered again, but the runtime
+started an empty session for the same `meeting_id` (sessions live only in the runtime's memory, and
+the extension only resends utterances that were never confirmed), so the history restarted from zero.
+
+Minimal recovery, with the extension as the buffer (no database, not the P5 Call Memory):
+- every runtime process has a random `instance` id, returned by `/health` and every
+  `GET /recommendation`;
+- `delivery.js` keeps, for the open tab, the utterances the runtime holds (ACCEPTED, or
+  DUPLICATE_SEQUENCE; not DUPLICATE_TEXT), at most 1,000;
+- when the `instance` changes, `Rehydrator` sends them once to `POST /rehydrate {meeting_id,
+  utterances}` (retried at the next poll if it fails);
+- `LiveSalesSession.rehydrate` inserts them in sequence order with their original ids, speaker and
+  text (role recomputed from the runtime's closer names). Context only: no trigger, no pending
+  analysis, no recommendation, not counted in `received/accepted` (own counter `rehydrated`);
+  idempotent per sequence; anything at or before the newest rehydrated id is never analyzed again.
+
+Not recovered (not reconstructible without inventing): the active recommendation, the last completed
+analysis, timings, cooldown, an analysis that was running at the crash. A new lead line after the
+restart is analyzed normally, with the rehydrated lines as context.
+
+Verified against the real runtime (`recovery_e2e`): 3 utterances (PRICE_BUDGET ACTIVE) -> runtime killed
+2.5 s -> restarted (new instance) -> rehydrated 3, `analyses_started: 0`, history identical -> a new
+line became the 4th and was analyzed; delivery 4/4 confirmed, 0 lost, 0 duplicates.
+
+**Validated in a real Google Meet test (2026-10-22, own accounts):** dock UX, delivery (0 silent loss, 0
+duplicate by retry), runtime restart with the history restored, no old line re-analyzed, new lines
+continuing after it, counters consistent, recommendation lifecycle unchanged.
+
+### Follow-up (separate, not P0): latest-utterance anchoring / precision
+
+Real Meet (2026-10-22): "Preciso falar com meu sócio antes de fechar." → `NO_QUALIFYING_EPISODE` while
+the older PRICE_BUDGET recommendation stayed ACTIVE. With an earlier objection in the window, E1
+annotates the old line and not the new one (also 52.5 % of the analyses in the 30-min soak ended in
+NO_QUALIFYING_EPISODE). Precision work, tracked apart from reliability.
+
+### Long-call soak
+
+`python -m closer_ai.live.soak --minutes 30` (real runtime over HTTP + real Ollama, invented lines,
+retries and repeated captions injected, snapshot checks every 0.5 s, resources every 30 s; output in
+`artifacts/live_soak/`). Every 30 s sample also carries the runtime counters, analysis error reasons
+and client counters, so a run stopped early still has its data.
+
+First run (2026-10-22, RTX 4050 6 GB, 15.6 GB RAM): planned 30 min, **stopped at 20.5 min by the
+host (system RAM critically low)**, so no final summary. From the 42 samples:
+- runtime never crashed; health `ready` throughout; model loaded the whole time (70 % GPU);
+- runtime RSS 17–39 MB; **Ollama `llama-server` RSS grew 3.5 → 5.9–6.8 GB**; VRAM 5.2–5.4 GB;
+- 204 utterances received, 155 accepted, 49 duplicates suppressed (injected retries + repeated
+  captions), 0 rejected; 65 analyses started, 64 completed, **27 ended in ERROR** (reasons were not
+  yet counted per type; the 1-minute smoke run's one error was `MalformedResponseError`, i.e. model
+  JSON off the contract); 5 recommendations.
+
+Second run (2026-10-22, Chrome closed, 5.4 GB free at start): **30.4 min completed**. 0 crash, 0
+silent loss, 0 duplicate ids in the transcript, 0 inconsistent snapshots in 3,542 polls; 267
+utterances posted, 224 accepted, 69 duplicates suppressed (26 injected retries + repeated captions), 0
+rejected; 93 analyses, 14 recommendations. Analysis outcomes, by class:
+
+| class | type | count | % analyses |
+|---|---|---:|---:|
+| technical error | SCHEMA_VALIDATION (classifier) | 41 | 44.1 |
+| fail-closed | NO_QUALIFYING_EPISODE | 29 | 31.2 |
+| recommended | GUIDED | 14 | 15.1 |
+| fail-closed | UNCORROBORATED_CATEGORY | 3 | 3.2 |
+| fail-closed | CLASSIFIER_INVALID | 3 | 3.2 |
+| no objection | NO_OBJECTION | 2 | 2.2 |
+| fail-closed | AMBIGUOUS_CATEGORIES | 1 | 1.1 |
+
+Root cause (100 % of technical errors): on long windows (up to 12 utterances, several objections) the
+classifier answered valid, complete JSON (`done_reason: stop`, not truncated) with an episode that
+dropped `category_candidates` (5/7 bad episodes when reproduced) or a corrupted key
+(`"obj,ection_segment_ids"`, 2/7). Fix: the live copilot asks Ollama to enforce the classifier's own
+output schema (`CLASSIFIER_SCHEMA`: exact keys, types, segment ids as strings, no enums; prompt
+unchanged; `classify_call(..., structured=True)`; post-call/eval unchanged). Measured on the same 10
+long windows with the live pipeline: malformed 6/10 -> 0/10 (1/10 CLASSIFIER_INVALID, fail-closed);
+precision probe unchanged (7/8, 0 false, 0 technical errors).
+
+Memory (Ollama `llama-server`, sampled every 30 s): committed (private) memory flat at ~14.8–15.0 GB
+the whole run (no leak); working set 1.7 GB -> ~9.3 GB by minute 14, then a plateau (8.2–9.5 GB) while
+system swap fell 7.9 -> 1.5 GB, i.e. pages of the same allocation coming back from swap. The earlier
+"3.5 -> 6.8 GB growth" was the same effect. The footprint itself is large for a 15.6 GB machine
+(system free RAM ~0.4 GB during most of the run, Chrome closed); that is the model runner's
+allocation, not the runtime (26–46 MB). Under that pressure the classifier median was 16.9 s.
+
+Third run, with the fix (2026-10-22, **Chrome open**, 0.3 GB free at start): **30.4 min completed**.
+0 crash, 0 silent loss, 0 duplicate ids, 0 inconsistent snapshots in 3,556 polls, health `ready`
+throughout; same 267 utterances / 224 accepted / 69 duplicates suppressed. **80 analyses, 0
+technical errors** (was 41/93), 20 recommendations (was 14). Fail-closed: NO_QUALIFYING_EPISODE 42
+(52.5 %), UNCORROBORATED_CATEGORY 10, CLASSIFIER_INVALID 3, AMBIGUOUS_CATEGORIES 1; NO_OBJECTION 2;
+KEPT (cooldown) 2. Ollama committed memory flat (14.7–15.0 GB); working set 4.4–8.0 GB going up and
+down with Chrome; system free RAM 0.3–2.0 GB. Latency under that pressure: classifier median 19.7 s
+(p95 30.4 s), queue wait median 6.6 s (max 21.4 s), recommendation end to end median 33.2 s (max
+66.1 s) — the P1 latency work, not changed here.
+
+Delivery under a runtime outage (real runtime over HTTP, `delivery.js` + the `background.js`
+classification, runtime killed for ~3.3 s and restarted): 30 utterances, 58 attempts, 28 retries
+(`RUNTIME_UNAVAILABLE`), **30/30 confirmed, 0 lost, 0 duplicates**. A restarted runtime starts with an
+empty session (no persistence by design).
+
 ## Runtime configuration (measured)
 
 Default: qwen3:8b, arm **E1**, `num_ctx` **4096**, 1024 tokens kept for the output. Measured on
@@ -269,7 +446,7 @@ Options:
   start;
 - `--debug` (temporary, test meetings only): logs every stage to stderr (`[CAPTION] [HTTP] [RUNTIME]
   [TRIGGER] [CLASSIFIER] [POLICY] [GUIDANCE] [GROUNDING] [STATE] [POLL]`, including caption text)
-  and adds the debug section to the sidebar (raw speaker → role, retrieval provenance, counters). On
+  and fills the dock's ••• panel (raw speaker → role, retrieval provenance, latencies, counters). On
   Windows run `set PYTHONIOENCODING=utf-8` first so names like "Você" print correctly;
 - `--port`: the default is 8765. Changing it also requires editing `background.js` and
   `host_permissions` in `manifest.json`.
@@ -289,10 +466,11 @@ Options:
    client data.
 4. Reload the extension in `chrome://extensions`, then reload the Meet tab. Turn on captions (CC) in
    Portuguese.
-5. The AI CLOSER sidebar appears on the right, above Meet's controls. Its status goes from
-   `Runtime offline` to `Ative as legendas (CC)`, then `Capturando`.
-6. The test participant says "Gostei da proposta, mas achei muito caro." → `Analisando fala do
-   lead…`, then, after ~16–25 s, the PRICE_BUDGET recommendation.
+5. The AI Closer dock appears at the bottom left, above Meet's controls. Its status goes from
+   `Runtime offline` to `Ative as legendas (CC)`, then `Ouvindo`.
+6. The test participant says "Gostei da proposta, mas achei muito caro." → `Analisando…` (yellow),
+   `Objeção detectada` (red), then, after ~14–16 s, `Sugestão pronta` (blue): the Sugestão button
+   gets a dot; open it to read the suggestion.
 7. If the status stays at `Ative as legendas` with captions on, or speakers come out as `unknown`,
    update `SELECTORS` in `meet_adapter.js`. Inspect the captions element in DevTools; that file is the
    only place that knows Meet's DOM.
