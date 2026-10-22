@@ -12,6 +12,7 @@ from closer_ai.ai.knowledge_context import CONCEPT_ORDER
 from closer_ai.ai.objection_classifier import EpisodePrediction
 from closer_ai.ai.objection_guidance import (
     EVIDENCE_GRADES,
+    GUIDANCE_SCHEMA,
     ObjectionKnowledgeError,
     build_guidance_prompt,
     guide_episode,
@@ -58,8 +59,9 @@ class FakeProvider:
         self.response = response
         self.prompts: list[str] = []
 
-    def classify(self, prompt: str):
+    def classify(self, prompt: str, **kw):
         self.prompts.append(prompt)
+        self.kwargs = kw
         return self.response(prompt) if callable(self.response) else self.response
 
 
@@ -215,6 +217,25 @@ def test_prompt_separates_call_evidence_from_sales_knowledge(kb, call):
     assert call.segments[0].text not in prompt  # only the episode's segments are call evidence
     assert "AUTHORITY_INTERNAL_BUY_IN.M1" in prompt[knowledge_at:]
     assert "PRICE_BUDGET.M1" not in prompt  # only the retrieved unit
+
+
+def test_brief_prompt_only_shortens_the_rationale(kb, call):
+    unit = kb.retrieve("AUTHORITY_INTERNAL_BUY_IN")
+    full, brief = build_guidance_prompt(call, _episode(call), unit), build_guidance_prompt(call, _episode(call), unit, brief=True)
+    assert "one or two sentences in Portuguese" in full  # default (post-call) unchanged
+    assert brief == full.replace("one or two sentences in Portuguese", "one short sentence in Portuguese")
+
+
+def test_live_guidance_asks_brief_and_enforced_schema_validation_unchanged(kb, call):
+    provider = FakeProvider(_answer(call))
+    g = guide_episode(call, _episode(call), kb, provider, live=True)
+    assert g.status == "GUIDED" and provider.kwargs == {"schema": GUIDANCE_SCHEMA}
+    assert "one short sentence in Portuguese" in provider.prompts[0]
+    assert set(GUIDANCE_SCHEMA["required"]) == {"move_id", "rationale", "suggested_question", "evidence_segment_ids"}
+    guide_episode(call, _episode(call), kb, provider)
+    assert provider.kwargs == {}  # post-call: plain JSON, as before
+    bad = FakeProvider(_answer(call, evidence_segment_ids=[2]))  # what qwen3 wrote without the schema
+    assert guide_episode(call, _episode(call), kb, bad, live=True).status == "INVALID_RESPONSE"  # still fails closed
 
 
 # --- grounding of model-generated guidance (fail closed) -------------------------------------

@@ -22,7 +22,8 @@ from closer_ai.ai.objection_classifier import MalformedResponseError
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-_USAGE_KEYS = ("prompt_eval_count", "eval_count", "total_duration")
+_USAGE_KEYS = ("prompt_eval_count", "eval_count", "total_duration", "load_duration", "prompt_eval_duration",
+               "eval_duration")
 
 
 class OllamaError(RuntimeError):
@@ -56,7 +57,7 @@ class OllamaClassificationProvider:
     name = "ollama"
 
     def __init__(self, model: str, base_url: str = DEFAULT_BASE_URL, timeout: float = 300.0,
-                 num_ctx: int = 16384) -> None:
+                 num_ctx: int = 16384, keep_alive: str | None = None) -> None:
         if not model:
             raise ValueError("model is required")
         self.model = model
@@ -65,26 +66,34 @@ class OllamaClassificationProvider:
         # ponytail: Ollama silently truncates prompts longer than num_ctx (default 2-4k) — size it
         # to the largest arm; compare `last_usage["prompt_eval_count"]` when in doubt.
         self.num_ctx = num_ctx
+        # How long Ollama keeps the model loaded after a request (e.g. "30m"); None = Ollama's default (5 min).
+        # The live runtime sets it so a quiet stretch of a call does not pay a model reload.
+        self.keep_alive = keep_alive
         # Observational usage of the latest classify() call (reset at each call; single-threaded).
         self.last_usage: dict[str, Any] = {}
 
     @property
     def config(self) -> dict[str, Any]:
         """Generation configuration for run provenance (no secrets; not part of the prompt digest)."""
-        return {"base_url": self.base_url, "timeout": self.timeout, "format": "json", "think": False,
-                "temperature": 0, "num_ctx": self.num_ctx}
+        c = {"base_url": self.base_url, "timeout": self.timeout, "format": "json", "think": False,
+             "temperature": 0, "num_ctx": self.num_ctx}
+        return c if self.keep_alive is None else {**c, "keep_alive": self.keep_alive}
 
-    def classify(self, prompt: str) -> Mapping[str, Any]:
+    def classify(self, prompt: str, schema: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+        """`schema`: a JSON schema Ollama enforces on the output (structured outputs) instead of plain JSON."""
         self.last_usage = {}
         c = self.config
-        body = json.dumps({
+        request_body = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "format": c["format"],
+            "format": dict(schema) if schema is not None else c["format"],
             "think": c["think"],
             "options": {"temperature": c["temperature"], "num_ctx": c["num_ctx"]},
-        }).encode("utf-8")
+        }
+        if self.keep_alive is not None:
+            request_body["keep_alive"] = self.keep_alive
+        body = json.dumps(request_body).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}/api/generate", data=body, headers={"Content-Type": "application/json"}
         )

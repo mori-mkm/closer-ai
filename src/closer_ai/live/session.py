@@ -62,6 +62,13 @@ MOVE_LABELS = {  # seller response codes (taxonomy v0.1) -> the action line of t
     "DEFER_FOLLOW_UP": "Combine o próximo passo", "CONFIRM_UNDERSTANDING": "Confirme o entendimento",
     "IGNORE_CHANGE_TOPIC": "Não force; mude de assunto",
 }
+OBJECTIVES = {  # the same codes as the seller-facing "Objetivo: ..." line (small, under the suggestion)
+    "ACKNOWLEDGE_VALIDATE": "reconhecer e validar", "CLARIFY": "esclarecer antes de responder",
+    "PROBE_EXPLORE": "explorar antes de defender", "ADDRESS_EXPLAIN": "responder e explicar",
+    "PROVIDE_EVIDENCE": "trazer evidência", "REFRAME": "reenquadrar", "NEGOTIATE_OFFER_ALTERNATIVE": "negociar uma alternativa",
+    "DEFER_FOLLOW_UP": "combinar o próximo passo", "CONFIRM_UNDERSTANDING": "confirmar o entendimento",
+    "IGNORE_CHANGE_TOPIC": "não forçar; mudar de assunto",
+}
 
 
 def _action(code: str | None, guidance: str, question: str) -> str:
@@ -107,6 +114,40 @@ def price_override(category: str | None, objection_text: str) -> str | None:
     return category
 
 
+# Live category normalization (real Meet, Oct 2026): Meet emitted "Preciso falar com o meu sócio antes"
+# ("de fechar." came as a separate, too-short line) and E1 labeled it TIMING_PRIORITY ("antes" reads as
+# postponing) while its own summary said "needs to speak with their partner before proceeding";
+# reproduced 4/4. AUTHORITY wins over TIMING_PRIORITY only when the objection words state that a named
+# third party must be consulted, must approve or decides; a role word alone ("meu sócio gostou") never
+# counts, and any explicit time marker ("mês que vem", "viajando", "novembro") leaves it as classified.
+# ponytail: phrase patterns, high precision / low recall by design; replace with a measured classifier fix.
+_THIRD_PARTY = (r"(?:o |a |os |as )?(?:meu |minha |meus |minhas |nosso |nossa |nossos |nossas )?"
+                r"(?:socios?|socias?|chefes?|gerentes?|diretor(?:es|a|as)?|diretoria|conselho|board|presidente|ceo|cfo|"
+                r"dono|dona|donos|patrao|superior|gestor(?:a|es)?|marido|esposa|esposo|mulher|financeiro|juridico|"
+                r"compras|investidor(?:es)?)")
+_AUTHORITY_DEPENDENCY = re.compile(
+    r"\b(?:"
+    r"(?:falar|conversar|consultar|validar|alinhar|checar|confirmar|discutir|ver|levar isso|passar isso|aprovar)"
+    rf"(?: isso| isto| a proposta| essa proposta)? (?:com|pra|para|por|pelo|pela) {_THIRD_PARTY}"
+    rf"|(?:quem|que) (?:decide|aprova|assina|bate o martelo)\b.*\b(?:e|eh|sao) {_THIRD_PARTY}"
+    rf"|{_THIRD_PARTY} (?:e|eh|sao) quem (?:decide|aprova|assina|bate o martelo)"
+    rf"|(?:aprovacao|autorizacao|aval|ok|decisao) (?:do|da|dos|das) {_THIRD_PARTY}"
+    rf"|(?:depende|dependo|dependemos) (?:do|da|dos|das) {_THIRD_PARTY}"
+    r")\b")
+_TIME_MARKER = re.compile(
+    r"\b(mes que vem|semana que vem|ano que vem|proxim[oa] (mes|semana|ano|trimestre)|viajando|de ferias|so volta"
+    r"|janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro"
+    r"|safra|colheita|fim do ano|final do ano|depois d[aeo]s? (feriado|ferias|carnaval|natal))\b")
+
+
+def authority_override(category: str | None, objection_text: str) -> str | None:
+    """AUTHORITY_INTERNAL_BUY_IN when TIMING_PRIORITY rests on an explicit third-party decision dependency."""
+    text = _fold(objection_text)
+    if category == "TIMING_PRIORITY" and _AUTHORITY_DEPENDENCY.search(text) and not _TIME_MARKER.search(text):
+        return "AUTHORITY_INTERNAL_BUY_IN"
+    return category
+
+
 @dataclass(frozen=True)
 class LiveUtterance:
     meeting_id: str
@@ -116,6 +157,7 @@ class LiveUtterance:
     timestamp: float  # epoch seconds, from the caption source
     sequence: int
     received_at: float  # epoch seconds, when the runtime got it (latency start)
+    caption_changed_at: float | None = None  # browser: last time the caption text changed (before emission)
 
 
 @dataclass(frozen=True)
@@ -143,10 +185,12 @@ class Recommendation:
     knowledge_unit: str | None = None
     move_id: str | None = None
     move_code: str | None = None
+    lead_said: str = ""  # the lead's objection words, verbatim from the captions ("Cliente disse")
 
     def view(self) -> dict[str, Any]:
         return {"state": self.state, "id": self.id, "category": self.category,
                 "label": LABELS.get(self.category, self.category), "move": self.move,
+                "lead_said": self.lead_said, "objective": OBJECTIVES.get(self.move_code or ""),
                 "rationale": self.rationale, "question": self.question, "grade": self.grade,
                 # only GUIDED guidance becomes a Recommendation, so grounding passed by construction
                 "knowledge_unit": self.knowledge_unit, "move_id": self.move_id, "move_code": self.move_code,
@@ -168,7 +212,11 @@ def _fold(text: str) -> str:
 def _usage(provider: Any) -> dict[str, Any]:
     inner = getattr(provider, "inner", provider)  # ContextGuard wraps the Ollama provider
     u = getattr(inner, "last_usage", {}) or {}
-    return {"prompt_tokens": u.get("prompt_eval_count"), "output_tokens": u.get("eval_count")}
+    out = {"prompt_tokens": u.get("prompt_eval_count"), "output_tokens": u.get("eval_count")}
+    for k in ("load", "prompt_eval", "eval", "total"):  # Ollama reports nanoseconds
+        if isinstance(u.get(f"{k}_duration"), int):
+            out[f"ollama_{k}_ms"] = round(u[f"{k}_duration"] / 1e6)
+    return out
 
 
 @dataclass
@@ -340,6 +388,9 @@ class LiveSalesSession:
                              "window_utterances": len(window), "superseded_leads": superseded,
                              "analysis_started_at": started}
         t["queue_wait_ms"] = _ms(started - t["caption_received_at"])
+        if trigger and trigger.caption_changed_at is not None:  # browser side, before the runtime saw it
+            t["caption_stable_wait_ms"] = _ms(trigger.timestamp - trigger.caption_changed_at)
+            t["caption_to_runtime_ms"] = _ms(trigger.received_at - trigger.timestamp)
         try:
             outcome, reason = self._decide(window, new_seqs, t)
         except (OllamaError, MalformedResponseError, InputTooLargeError) as exc:  # live: no recommendation, no crash
@@ -351,6 +402,14 @@ class LiveSalesSession:
             t["classifier_latency_ms"] = _ms(t["classifier_finished_at"] - started)
         if t.get("guidance_finished_at"):
             t["guidance_latency_ms"] = _ms(t["guidance_finished_at"] - t["classifier_finished_at"])
+        if t.get("policy_finished_at"):  # classifier done -> guidance call starts (validation, gates, retrieval)
+            t["policy_ms"] = _ms(t["policy_finished_at"] - t["classifier_finished_at"])
+        # Time outside Ollama: prompt build + parse + validation (classifier); retrieval + prompt build +
+        # validation/grounding (guidance).
+        if "classifier_latency_ms" in t and "ollama_total_ms" in t.get("classifier", {}):
+            t["classifier_local_ms"] = t["classifier_latency_ms"] - t["classifier"]["ollama_total_ms"]
+        if "guidance_latency_ms" in t and "ollama_total_ms" in t.get("guidance", {}):
+            t["guidance_local_ms"] = t["guidance_latency_ms"] - t["policy_ms"] - t["guidance"]["ollama_total_ms"]
         t["end_to_end_latency_ms"] = _ms(self.clock() - t["caption_received_at"])  # caption -> outcome ready
         with self.lock:  # one atomic swap: recommendation, active -> None, last completed -> this result
             if new_rec is not None:
@@ -400,11 +459,12 @@ class LiveSalesSession:
             return "NO_RECOMMENDATION", "AMBIGUOUS_CATEGORIES"
         episode = candidates[0]
         objection_text = " ".join(seg.text for seg in call.segments if seg.segment_id in episode.objection_segment_ids)
-        category = price_override(episode.category, objection_text)
+        category = authority_override(price_override(episode.category, objection_text), objection_text)
         if category != episode.category:
             t["category_before"] = episode.category
             self._dbg("CLASSIFIER", category_normalized=f"{episode.category} -> {category}",
-                      reason="explicit price words in the objection evidence")
+                      reason=("explicit price words" if category == "PRICE_BUDGET"
+                              else "explicit third-party decision dependency") + " in the objection evidence")
             episode = dataclasses.replace(episode, category=category)
         cues = CORROBORATION.get(episode.category)
         if cues:
@@ -426,7 +486,9 @@ class LiveSalesSession:
         guidance_episode = dataclasses.replace(episode, context_segment_ids=factual)
         self._dbg("POLICY", emit=True, category=episode.category, anchor=episode.objection_segment_ids[0],
                   objection_evidence=list(episode.objection_segment_ids), factual_evidence=list(factual))
-        guidance = guide_episode(call, guidance_episode, self.knowledge, self.provider)
+        t["policy_finished_at"] = self.clock()
+        # live: one-sentence rationale (debug-only in the sidebar) + schema-enforced shape; see guide_episode
+        guidance = guide_episode(call, guidance_episode, self.knowledge, self.provider, live=True)
         t.update(guidance_finished_at=self.clock(), guidance=_usage(self.provider))
         self._dbg("GUIDANCE", status=guidance.status, errors=list(guidance.errors), usage=t["guidance"],
                   move=guidance.knowledge_move_id)
@@ -442,7 +504,8 @@ class LiveSalesSession:
                              g.suggested_question),
                 rationale=_first_sentence(g.rationale), question=g.suggested_question, grade=guidance.knowledge_grade,
                 shown_at=self.clock(), knowledge_unit=guidance.knowledge_unit_id,
-                move_id=guidance.knowledge_move_id, move_code=guidance.recommended_move.code)
+                move_id=guidance.knowledge_move_id, move_code=guidance.recommended_move.code,
+                lead_said=objection_text)
             self._next_id += 1
             self.last_guidance, self.last_guidance_at = guidance, self.clock()
             if episode.category not in self.open_objections:

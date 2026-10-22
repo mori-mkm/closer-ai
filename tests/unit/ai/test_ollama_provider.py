@@ -258,3 +258,20 @@ def test_usage_reset_when_a_later_call_fails(fake):
     with pytest.raises(OllamaError):
         p.classify("x")
     assert p.last_usage == {}
+
+
+def test_keep_alive_is_sent_only_when_set(fake):
+    fake.reply("{}")
+    fake.reply("{}")
+    provider(fake).classify("x")
+    p = provider(fake, keep_alive="30m")
+    p.classify("x")
+    assert "keep_alive" not in fake.requests[0][1]  # default: Ollama's own (unchanged request)
+    assert fake.requests[1][1]["keep_alive"] == "30m" and p.config["keep_alive"] == "30m"
+
+
+def test_schema_is_sent_as_the_format(fake):
+    fake.reply("{}")
+    schema = {"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]}
+    provider(fake).classify("x", schema=schema)
+    assert fake.requests[0][1]["format"] == schema

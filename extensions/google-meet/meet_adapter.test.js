@@ -14,7 +14,7 @@ test("partial captions are consolidated into one utterance once stable", () => {
   const out = t.tick(1700, [cap(1, "Ana", "Gostei da proposta, mas achei caro.")]);
   assert.strictEqual(out.length, 1);
   assert.deepStrictEqual(out[0], { meeting_id: "abc-defg-hij", speaker: "Ana", text: "Gostei da proposta, mas achei caro.",
-    timestamp: 1700, sequence: 1 });
+    timestamp: 1700, sequence: 1, changed_at: 600 }); // stable for 1.1 s after the last change
 });
 
 test("the same caption is never emitted twice", () => {

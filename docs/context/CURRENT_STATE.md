@@ -7,10 +7,10 @@ Reconciliar o documento inteiro; não empilhar correções no fim._
 
 - Data do snapshot: 2026-10-21 (fechamento do Live Meet Copilot v0)
 - Code baseline reviewed: `f54ea28` (Objection Guidance Engine v0) + checkpoint Live Meet Copilot v0
-- Tests: **732 passed** (`pytest -q`) após Objection Guidance Engine v0/v0.1 + Live Meet Copilot v0
-  (+140 sobre 592: guidance, grounding, post-call, CLI/pilot runner, long-call chunking, live session).
-  Extensão: `node --test` em `extensions/google-meet/meet_adapter.test.js` (5) e
-  `sidebar_view.test.js` (5). Todos herméticos: nenhum teste exige Ollama, rede ou dado real
+- Tests: **737 passed** (`pytest -q`) após Objection Guidance Engine v0/v0.1 + Live Meet Copilot v0
+  + v1 (+145 sobre 592: guidance, grounding, post-call, CLI/pilot runner, long-call
+  chunking, live session). Extensão: `node --test` em `extensions/google-meet/meet_adapter.test.js`
+  (5) e `sidebar_view.test.js` (6). Todos herméticos: nenhum teste exige Ollama, rede ou dado real
 - Lint: `ruff check .` limpo
 - CI: `.github/workflows/ci.yml` (import sanity check, `ruff check .`, `pytest -q`) em toda PR e
   push para `main`
@@ -66,7 +66,7 @@ Canonical Call ─► prompt E0 / E1 / E2 ◄───────────�
 | Objection Classifier core + braços E0/E1/E2 | `src/closer_ai/ai/objection_classifier.py`; [doc](../ai/OBJECTION_CLASSIFIER_RUNNER_V0_1.md) | eval layer; predições ≠ `ObjectionEpisode` ≠ gold; labels CIT-O1, não enum do domínio |
 | Ollama Classification Provider v0.1 (local-only) | `src/closer_ai/ai/ollama_provider.py`; [doc](../ai/OLLAMA_CLASSIFICATION_PROVIDER_V0_1.md); [ADR-005](../decisions/ADR_005-classification-provider-boundary.md) | loopback only; sem retry/reparo; nenhum provider cloud |
 | Objection Guidance Engine v0 + Post-call Intelligence v0 (Value Sprint) | `src/closer_ai/ai/{objection_guidance,post_call}.py`, `src/closer_ai/demo/analyze_call.py`, `docs/knowledge/sales/guidance/`; [doc](../ai/OBJECTION_GUIDANCE_ENGINE_V0.md) | vertical slice sintético; retrieval = lookup por categoria; grounding lexical fail-closed; pilot runner + truncation guard + pilot summary prontos ([pilot](../product/REAL_CALL_PILOT.md)), bloqueado por autorização; graus da pesquisa preservados (nenhum movimento com taxa medida); **sem avaliação de qualidade** |
-| Live Meet Copilot v0 (prioridade de produto) | `src/closer_ai/live/`, `extensions/google-meet/`; [doc](../product/LIVE_MEET_COPILOT_V0.md) | **validado ponta a ponta em Meet real de teste (2026-10-21)**: captions → speaker/role → classifier E1 @ 4k → normalização `price_override` → policy → knowledge por categoria exata → CommercialGuidance → grounding VALID → recomendação ACTIVE na sidebar (PRICE_BUDGET, move CLARIFY). Fila latest-wins, `active_analysis` vs `last_completed_analysis`, `--debug`. Limites: ~16–25 s por recomendação; só 1 objeção validada ao vivo; precisão medida só em 12 frases sintéticas; calls longas reais não validadas; sem Playbook Compliance / Opportunity Detection / Manager Intelligence; backlog B1–B3 no [doc](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented) |
+| Live Meet Copilot v0 (prioridade de produto) | `src/closer_ai/live/`, `extensions/google-meet/`; [doc](../product/LIVE_MEET_COPILOT_V0.md) | **validado ponta a ponta em Meet real de teste (2026-10-21)**: captions → speaker/role → classifier E1 @ 4k → normalização `price_override` → policy → knowledge por categoria exata → CommercialGuidance → grounding VALID → recomendação ACTIVE na sidebar (PRICE_BUDGET, move CLARIFY). Fila latest-wins, `active_analysis` vs `last_completed_analysis`, `--debug`. v1 (branch `feat/live-copilot-v1`, validado em Meet real de teste em 2026-10-22: PRICE_BUDGET e AUTHORITY_INTERNAL_BUY_IN GUIDED/VALID/ACTIVE, frase neutra sem recomendação; `authority_override` TIMING→AUTHORITY em dependência explícita de terceiro): card "Cliente disse + Sugestão" e latência caption→sidebar ~16–17 s → ~13,5–14,5 s de mediana no benchmark sintético (`python -m closer_ai.live.bench`), precisão no probe 4/8 → 7/8 sem falso positivo. Limites: latência real do v1 não registrada (só sintética); gargalo = geração de tokens com o modelo 30 % em CPU (GPU 6 GB); 2 categorias validadas ao vivo; precisão medida só em 14 frases sintéticas; calls longas reais não validadas; sem Playbook Compliance / Opportunity Detection / Manager Intelligence; backlog B1–B3 no [doc](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented) |
 | Experiment Runner v0.1 | `src/closer_ai/ai/experiment_runner.py`; [doc](../ai/EXPERIMENT_RUNNER_V0_1.md) | compliance operacional + proveniência; **sem métricas de qualidade**; artifacts privacy-first em `artifacts/` (gitignored) |
 | Privacy boundary + OCI shared storage foundation | [ADR-004](../decisions/ADR_004-real-data-privacy-boundary.md); `docs/data/` | OCI provisionado e smoke-tested **só com dado sintético**; nenhum dado real enviado |
 | Agent harness + CI | `.claude/agents/`, `docs/agents/`, `.github/workflows/ci.yml` | — |
@@ -132,7 +132,8 @@ sem enforcement de "sem PII"), TD-12 (branch protection não verificada).
 
 ## Next technical step
 
-Live Meet Copilot v0 está fechado (validado em Meet real de teste). Próximo passo, a decidir
+Live Meet Copilot v1 (UX do vendedor + latência + normalização de AUTHORITY) está fechado na branch
+`feat/live-copilot-v1`, validado em Meet real de teste. Depois, a decidir
 entre os itens do backlog no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented):
 B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Opportunity Detection. B2 e
 B3 dependem do playbook comercial AgroTalento (Gabriel). Em paralelo: testar as outras 7 categorias

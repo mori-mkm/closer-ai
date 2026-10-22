@@ -87,14 +87,14 @@ class ContextGuard:
         """Longest prompt the estimate accepts; the long-call planner sizes chunks with it."""
         return math.floor(self.budget * self.chars_per_token)
 
-    def classify(self, prompt: str) -> Any:
+    def classify(self, prompt: str, **kw: Any) -> Any:
         estimate = math.ceil(len(prompt) / self.chars_per_token)
         if estimate > self.budget:
             raise InputTooLargeError(
                 f"prompt ~{estimate} tokens (estimate) exceeds the budget of {self.budget} "
                 f"(num_ctx {self.num_ctx} - output reserve); call not analyzed, nothing truncated")
         self.calls += 1
-        result = self.inner.classify(prompt)
+        result = self.inner.classify(prompt, **kw)
         used = getattr(self.inner, "last_usage", {}).get("prompt_eval_count")
         if isinstance(used, int) and used > self.budget:
             raise InputTooLargeError(f"model reported {used} prompt tokens > budget {self.budget}; "

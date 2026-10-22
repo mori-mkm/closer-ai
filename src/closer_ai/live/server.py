@@ -28,7 +28,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from closer_ai.ai.objection_guidance import load_objection_knowledge
-from closer_ai.ai.ollama_provider import OllamaClassificationProvider
+from closer_ai.ai.ollama_provider import OllamaClassificationProvider, OllamaError
 from closer_ai.demo.analyze_call import CLASSIFICATION_KB, GUIDANCE_KB, ContextGuard
 from closer_ai.live.session import LiveConfig, LiveSalesSession, LiveUtterance
 
@@ -65,7 +65,8 @@ def parse_utterance(payload: Any, closer_names: set[str], received_at: float) ->
     return LiveUtterance(meeting_id=meeting_id, speaker=speaker.strip() or "unknown",
                          role=role_for(speaker, closer_names), text=text.strip(),
                          timestamp=_timestamp(payload.get("timestamp", received_at)), sequence=seq,
-                         received_at=received_at)
+                         received_at=received_at,
+                         caption_changed_at=_timestamp(payload["changed_at"]) if "changed_at" in payload else None)
 
 
 class Runtime:
@@ -165,7 +166,7 @@ class Runtime:
             view["transcript"] = [{"role": u.role, "text": u.text, **({"speaker": u.speaker} if self.debug else {})}
                                   for u in s.transcript()]
         if self.debug:
-            if self._last_poll.get(meeting_id) != view["state"]:  # log changes only (polled every 1.5 s)
+            if self._last_poll.get(meeting_id) != view["state"]:  # log changes only (polled every 0.5 s)
                 self._last_poll[meeting_id] = view["state"]
                 self.dbg("POLL", meeting_id=meeting_id, session=True, state=view["state"])
             view["debug"] = {**s.debug_state, "session": True, "utterances": len(s.utterances),
@@ -251,6 +252,18 @@ def replay(runtime: Runtime, path: Path, delay: float) -> None:
         time.sleep(delay)
 
 
+def warm_up(ollama: OllamaClassificationProvider, log) -> None:
+    """Load the model (same options as the analyses) before the first objection: a cold load measured
+    6.7-23 s on the RTX 4050 test machine, all of it otherwise added to the first recommendation."""
+    t0 = time.time()
+    try:
+        ollama.classify('Return {"ok": true} as JSON.')
+        log(json.dumps({"warm_up_ms": round((time.time() - t0) * 1000),
+                        "load_ms": round(ollama.last_usage.get("load_duration", 0) / 1e6)}))
+    except (OllamaError, ValueError) as exc:  # never blocks serving; the first analysis reports the real error
+        log(json.dumps({"warm_up_error": f"{type(exc).__name__}: {exc}"}))
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--closer", default="", help="comma-separated caption names of the closer (besides 'You')")
@@ -264,14 +277,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cooldown", type=float, default=LiveConfig.cooldown_seconds)
     p.add_argument("--ttl", type=float, default=LiveConfig.ttl_seconds)
     p.add_argument("--timeout", type=float, default=120.0, help="Ollama request timeout (s)")
+    p.add_argument("--keep-alive", default="30m",
+                   help="how long Ollama keeps the model loaded between analyses ('' = Ollama's default, 5 min)")
     p.add_argument("--replay", type=Path, help="stream this transcript instead of serving")
     p.add_argument("--delay", type=float, default=1.0, help="seconds between replayed utterances")
     p.add_argument("--debug", action="store_true",
                    help="temporary: log every pipeline stage (with caption text) and show a debug panel; test meetings only")
     a = p.parse_args(argv)
 
-    provider = ContextGuard(OllamaClassificationProvider(a.model, timeout=a.timeout, num_ctx=a.num_ctx),
-                            num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
+    ollama = OllamaClassificationProvider(a.model, timeout=a.timeout, num_ctx=a.num_ctx, keep_alive=a.keep_alive or None)
+    provider = ContextGuard(ollama, num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
     config = LiveConfig(window_seconds=a.window_seconds, max_window_utterances=a.window_utterances,
                         cooldown_seconds=a.cooldown, ttl_seconds=a.ttl, arm=a.arm)
     names = {n.strip() for n in a.closer.split(",") if n.strip()}
@@ -280,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
         replay(runtime, a.replay, a.delay)
         return 0
     server = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(runtime))
+    threading.Thread(target=warm_up, args=(ollama, runtime.log), daemon=True).start()
     print(f"AI Closer live runtime on http://127.0.0.1:{a.port} ({a.model}, {a.arm}, num_ctx {a.num_ctx})"
           f" closer names: {sorted(runtime.closer_names)}{' [DEBUG]' if a.debug else ''}", file=sys.stderr, flush=True)
     try:

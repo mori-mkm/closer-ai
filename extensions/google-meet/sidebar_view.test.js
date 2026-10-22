@@ -8,6 +8,7 @@ const ctx = { runtimeOk: true, captionsOn: true, meetingId: "abc-defg-hij",
 const ready = {
   state: "ACTIVE", id: 1, category: "PRICE_BUDGET", label: "Preço / orçamento", move: "Esclareça antes de responder",
   question: "Caro em relação a quê?", rationale: "O lead disse que achou caro.", grade: "WEAK",
+  lead_said: "Gostei da proposta, mas achei muito caro.", objective: "esclarecer antes de responder",
   knowledge_unit: "guidance.PRICE_BUDGET", move_id: "PRICE_BUDGET.M2", move_code: "CLARIFY", grounding: "VALID",
   status: "RECOMMENDATION_READY",
   transcript: [{ role: "closer", text: "Entendi." }, { role: "lead", text: "Gostei da proposta, mas achei muito caro." }],
@@ -17,8 +18,9 @@ test("transcript and recommendation are exactly what the runtime sent", () => {
   const v = sidebarView(ready, ctx);
   assert.deepStrictEqual(v.transcript.map((l) => `${l.who}: ${l.text}`),
     ["Closer: Entendi.", "Lead: Gostei da proposta, mas achei muito caro."]);
-  assert.strictEqual(v.rec.category, "PRICE_BUDGET");
+  assert.strictEqual(v.rec.said, "Gostei da proposta, mas achei muito caro.");
   assert.strictEqual(v.rec.question, "Caro em relação a quê?");
+  assert.strictEqual(v.rec.objective, "esclarecer antes de responder");
   assert.strictEqual(v.status.text, "Recomendação pronta");
   assert.strictEqual(v.debugLines, null); // not in debug mode
 });
@@ -64,4 +66,13 @@ test("the analysis running now and the last finished one are shown separately", 
   assert.deepStrictEqual(v.debugLines.slice(i + 1, i + 5), ["category: IMPLEMENTATION_INTEGRATION",
     "outcome: NO_RECOMMENDATION", "reason: UNCORROBORATED_CATEGORY", "segment: seg_2"]);
   assert.strictEqual(sidebarView({ ...data, active_analysis: null }, ctx).analyzing, null);
+});
+
+test("the seller card carries no technical fields; they stay in debug", () => {
+  const v = sidebarView(ready, ctx);
+  assert.deepStrictEqual(Object.keys(v.rec).sort(), ["id", "label", "objective", "question", "said"]);
+  const card = JSON.stringify(v.rec);
+  for (const tech of ["PRICE_BUDGET", "guidance.", "VALID", "seg_"]) assert.ok(!card.includes(tech), tech);
+  const dbg = sidebarView({ ...ready, debug: { utterances: 2 } }, ctx).debugLines;
+  for (const line of ["category: PRICE_BUDGET", "rationale: O lead disse que achou caro."]) assert.ok(dbg.includes(line), line);
 });
