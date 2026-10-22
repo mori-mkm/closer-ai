@@ -171,7 +171,7 @@ def _step_problems(owner: str, action: str, due: Any, evidence: tuple[Quote, ...
     return problems
 
 
-def _extract(call: Call, response: Any) -> tuple[LeadEndPosition, tuple[Stakeholder, ...],
+def extract_post_call(call: Call, response: Any) -> tuple[LeadEndPosition, tuple[Stakeholder, ...],
                                                  tuple[NextStep, ...], list[str]]:
     unknown = LeadEndPosition("UNKNOWN", ())
     keys = {"lead_end_position", "stakeholders", "next_steps"}
@@ -271,7 +271,7 @@ def analyze_call(
     errors += [f"guidance {g.prediction_id}: {e}" for g in guidance if g.status == "INVALID_RESPONSE"
                for e in g.errors]
 
-    position, stakeholders, steps, extract_errors = _extract(call, provider.classify(build_post_call_prompt(call)))
+    position, stakeholders, steps, extract_errors = extract_post_call(call, provider.classify(build_post_call_prompt(call)))
     errors += extract_errors
     return PostCallIntelligence(
         call_id=call.call_id,

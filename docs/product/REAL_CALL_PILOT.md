@@ -29,39 +29,52 @@ evidence. Gabriel and a closer read the outputs of 5–10 real calls, to decide 
 python -m closer_ai.demo.analyze_call "D:/pilot/calls" \
   --out-dir "D:/pilot/out" \
   --roles "Renato=lead,Ana=closer" \
-  --num-ctx 40960 \
   --continue-on-error
 ```
+
+It runs on qwen3:8b with the E2 classifier and `num_ctx` 16384 (the defaults). Each file is read as
+UTF-8, with or without BOM.
 
 Output:
 - `<call>.json` + `<call>.md` per call;
 - `review_sheet.csv`;
-- a summary such as `summary: SUCCESS=6 INVALID=2 INPUT_TOO_LARGE=1 ERROR=0`.
+- per call, a line like `SUCCESS  x.txt [chunked, 7 chunk(s), 17 LLM calls]`;
+- a final summary with one count per status.
 
 | Status | Meaning |
 |---|---|
-| SUCCESS | Nothing the model wrote was rejected. |
-| INVALID | Some model output was rejected by a validator (listed under "Avisos" in the Markdown). The call still has an output, with less content. |
-| INPUT_TOO_LARGE | The call may not fit the model context. **It is not analyzed:** no output is written and nothing is truncated, chunked or summarized. |
-| ERROR | The call failed to run: parse error, Ollama down, malformed JSON. |
+| SUCCESS | Every chunk was processed and nothing the model wrote was rejected. |
+| INVALID | Some model output was rejected by a validator (listed under "Avisos" in the Markdown), in any chunk. The call still has an output, with less content. |
+| INPUT_TOO_LARGE | A single utterance is too long to fit the context even on its own. The call is not analyzed; utterances are never split. |
+| OLLAMA_TIMEOUT | Ollama did not answer one request within the provider timeout (300 s). The call gets no output. |
+| OLLAMA_UNREACHABLE | Nothing is listening at the Ollama URL (not started, wrong port). The call gets no output. |
+| ERROR | Any other failure: parse error, malformed model JSON, HTTP error. The call gets no output. |
 
-### Context size (no silent truncation)
+A call never gets a partial output marked SUCCESS. A failed request in any chunk means no output for
+that call; with `--continue-on-error`, the next call still runs.
 
-Ollama silently truncates a prompt that is longer than `num_ctx`. The CLI therefore refuses any prompt
-whose conservative size estimate does not fit:
+### Long calls: deterministic chunking, no silent truncation
+
+Ollama silently truncates a prompt longer than `num_ctx`. Every prompt therefore goes through a guard
+that refuses anything whose conservative size estimate does not fit:
 - the estimate is 2.5 chars/token (the measured ratio on these prompts is 3.1–3.6);
 - 2048 tokens are reserved for the output;
 - the output is also discarded if Ollama reports a prompt that fills that budget.
 
-Rough capacity with the E2 classifier (the transcript is sent whole):
+The runner then decides on its own:
+- **single context:** if the whole call fits (about 10 minutes of conversation), the normal pipeline
+  runs.
+- **chunked:** otherwise the call is cut into runs of **whole utterances**.
+  - Each chunk is the size of a prompt the guard accepts, with E2 instructions and knowledge included.
+  - Chunks are balanced in size, and neighbouring chunks share 2 utterances.
+  - Each chunk goes through the same E2 classifier and the same post-call extraction.
+  - Episodes and next steps duplicated by the overlap are merged deterministically.
+  - Guidance is generated once per merged episode.
+  - The lead's end position comes from the last chunk.
+  - Risks are computed after the merge.
 
-| `--num-ctx` | Transcript that fits | |
-|---|---|---|
-| 16384 (default) | ~12k chars, ~10 min of conversation | |
-| 40960 | ~74k chars, ~60 min | qwen3:8b's native maximum; more RAM/VRAM, slower |
-
-A call that still does not fit comes back INPUT_TOO_LARGE: note it, and do not cut it by hand to make
-it fit.
+  Nothing is summarized, and no utterance is cut. The JSON records `processing_mode`, `chunk_count`,
+  `segments_processed`, `llm_calls` and the per-chunk ranges.
 
 ## Review sheet (`review_sheet.csv`, UTF-8, opens in Excel)
 
@@ -73,7 +86,8 @@ it fit.
 | `knowledge_grade` | pipeline | WEAK = practice hypothesis, no measured effect |
 | `next_step_detected` | pipeline | yes / no |
 | `risk_count` | pipeline | number of rule-based risks |
-| `pipeline_status` | pipeline | SUCCESS / INVALID / INPUT_TOO_LARGE / ERROR |
+| `pipeline_status` | pipeline | one of the statuses above |
+| `processing_mode`, `chunk_count` | pipeline | `single_context` / `chunked`, and how many chunks |
 | `human_category_correct` | reviewer | yes / no |
 | `human_guidance_useful` | reviewer | **2** useful and actionable · **1** partially useful · **0** useless or wrong |
 | `human_guidance_grounded` | reviewer | yes / no: does every fact in the guidance appear in the call? |

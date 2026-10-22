@@ -122,9 +122,9 @@ SUCCESS / INVALID / ERROR summary.
   INVALID is the fail-closed outcome.
 - **Fact base is narrow.** Guidance is grounded only in the episode's objection and context segments,
   so a fact said elsewhere in the call cannot be reused in the guidance.
-- The `.txt` format is a demo input, not a source contract (no Zoom/Agro parser). Long real calls go
-  through the same full-transcript classifier prompt (`num_ctx` 16384); a call longer than that
-  context window is truncated by Ollama.
+- The `.txt` format is a demo input, not a source contract (no Zoom/Agro parser). A call that does not
+  fit the 16k context is processed in deterministic chunks by the pilot runner
+  (`demo/long_call.py`; see [the pilot doc](../product/REAL_CALL_PILOT.md)). Nothing is truncated.
 - Stakeholders and end position are not validated against gold; only ids, owners, actions and dates
   are checked deterministically.
 - Gabriel's open decisions (#1–#7 in the research) are not implemented. One example: the rule for

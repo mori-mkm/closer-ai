@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "AI Closer — Live Meet Copilot (dev)",
+  "version": "0.1.0",
+  "description": "Reads Google Meet captions and shows one live commercial recommendation from the local AI Closer runtime.",
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["meet_adapter.js", "sidebar_view.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -276,7 +276,7 @@ def test_cli_batch_continue_on_error_writes_outputs_review_sheet_and_summary(tmp
 
     assert code == 1  # one ERROR
     err = capsys.readouterr().err
-    assert "ERROR    broken.txt" in err and "summary: SUCCESS=2 INVALID=0 INPUT_TOO_LARGE=0 ERROR=1" in err
+    assert "ERROR    broken.txt" in err and "summary: SUCCESS=2 INVALID=0 INPUT_TOO_LARGE=0 OLLAMA_TIMEOUT=0 OLLAMA_UNREACHABLE=0 ERROR=1" in err
     for name in ("price_budget", "timing_priority"):
         data = json.loads((out / f"{name}.json").read_text(encoding="utf-8"))
         assert data["commercial_guidance"][0]["status"] == "GUIDED"

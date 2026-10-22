@@ -1,0 +1,456 @@
+"""Live sales session: incremental utterances -> rolling window -> at most one recommendation.
+
+See docs/product/LIVE_MEET_COPILOT_V0.md. Reuses the existing pieces unchanged: the E0/E1/E2
+classifier (`classify_call`), exact-category retrieval + CommercialGuidance (`guide_episode`) and its
+fail-closed grounding. What is new here is only the live policy around them:
+
+- Rolling context: only the last `window_seconds` (at most `max_window_utterances`) go to the model.
+- Trigger: a new complete lead utterance, long enough and not a repeat of the last analyzed one.
+- Emission is conservative (the classifier over-detects): a recommendation needs a valid
+  classifier run (after dropping context cited from before the anchor), a PRESENT category other than OTHER, anchored on a lead utterance that is new
+  since the previous analysis, a single candidate category, the lead's own words for a category
+  in `CORROBORATION`, and GUIDED (grounded) guidance.
+  Anything else is NO_RECOMMENDATION; showing nothing beats showing a false objection.
+- One recommendation at a time: same category inside the cooldown keeps the current one (no LLM
+  guidance call); another category, or the same after the cooldown, replaces it; it expires after
+  `ttl_seconds` or when dismissed.
+- Latency is recorded per analysis as technical timings only (no transcript text).
+"""
+from __future__ import annotations
+
+import dataclasses
+import difflib
+import re
+import threading
+import time
+import unicodedata
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from closer_ai.ai.objection_classifier import (
+    Arm,
+    ClassificationProvider,
+    EpisodePrediction,
+    MalformedResponseError,
+    classify_call,
+    validate_predictions,
+)
+from closer_ai.ai.objection_guidance import ObjectionKnowledge, _generic, guide_episode
+from closer_ai.ai.ollama_provider import OllamaError
+from closer_ai.demo.analyze_call import InputTooLargeError
+from closer_ai.normalization.models import Call, Participant, TranscriptSegment
+
+LABELS = {  # short pt-BR label for the panel; the category itself is always shown too
+    "PRICE_BUDGET": "Preço / orçamento",
+    "TIMING_PRIORITY": "Timing / prioridade",
+    "NEED_VALUE_FIT": "Necessidade / valor",
+    "AUTHORITY_INTERNAL_BUY_IN": "Decisão / aprovação interna",
+    "TRUST_RISK": "Confiança / risco",
+    "COMPETITION_EXISTING_SOLUTION": "Concorrência / solução atual",
+    "IMPLEMENTATION_INTEGRATION": "Implementação / integração",
+    "TERMS_PROCESS": "Termos / processo de compra",
+}
+
+
+MOVE_LABELS = {  # seller response codes (taxonomy v0.1) -> the action line of the panel
+    "ACKNOWLEDGE_VALIDATE": "Reconheça e valide", "CLARIFY": "Esclareça antes de responder",
+    "PROBE_EXPLORE": "Explore antes de defender", "ADDRESS_EXPLAIN": "Responda e explique",
+    "PROVIDE_EVIDENCE": "Traga evidência", "REFRAME": "Reenquadre", "NEGOTIATE_OFFER_ALTERNATIVE": "Negocie uma alternativa",
+    "DEFER_FOLLOW_UP": "Combine o próximo passo", "CONFIRM_UNDERSTANDING": "Confirme o entendimento",
+    "IGNORE_CHANGE_TOPIC": "Não force; mude de assunto",
+}
+
+
+def _action(code: str | None, guidance: str, question: str) -> str:
+    """Panel action line: the move's code label + its guidance, unless the guidance is the question itself."""
+    label = MOVE_LABELS.get(code or "", "")
+    detail = "" if guidance.strip(' "“”') == question.strip(' "“”') else guidance
+    return f"{label}: {detail}" if label and detail else label or detail
+
+
+def _first_sentence(text: str) -> str:
+    end = min((i for i in (text.find(". "), text.find("! ")) if i >= 0), default=-1)
+    return text[:end + 1] if end >= 0 else text
+
+
+# Emission gate for categories measured to over-detect live (benchmark + live probe, Oct 2026): the
+# lead's own words must mention putting the solution in place. Without it ("a gente perde tempo com
+# isso" = pain, not resistance) the episode is not shown.
+# ponytail: stem list, misses paraphrases (recall ceiling); replace with a measured precision fix.
+CORROBORATION: dict[str, tuple[str, ...]] = {
+    "IMPLEMENTATION_INTEGRATION": ("implant", "implement", "integr", "instal", "configur", "migr", "treina",
+                                   "aplicar", "tocar isso", "gente pra", "equipe pra", "equipe nao",
+                                   "formato", "presencial", "adapt"),
+}
+
+
+# Live category normalization (real Meet, Oct 2026): after noise and a pain line, E1 labeled "Gostei da
+# proposta, mas achei muito caro." NEED_VALUE_FIT (its definition includes "the benefit does not pay
+# off") while its own summary said "too expensive". PRICE_BUDGET wins over NEED_VALUE_FIT only when the
+# lead's objection words themselves are unambiguously about money, and never when they also deny the
+# need or fit (mixed = ambiguous = left as classified). Matched on accent-folded text, whole words.
+# ponytail: word list, high precision / low recall by design; replace with a measured classifier fix.
+_PRICE_WORDS = re.compile(r"\b(caro|caros|carissim[oa]s?|preco|precos|orcamento|orcamentos|budget|custo|custos"
+                          r"|custa|custam|custar|verba)\b")
+_NEED_DENIAL = re.compile(r"\b(nao (preciso|precisamos|resolve|serve|faz sentido|vejo valor|compensa)"
+                          r"|desnecessari\w*)\b")
+
+
+def price_override(category: str | None, objection_text: str) -> str | None:
+    """PRICE_BUDGET when NEED_VALUE_FIT rests on explicit price words alone; otherwise the category unchanged."""
+    text = _fold(objection_text)
+    if category == "NEED_VALUE_FIT" and _PRICE_WORDS.search(text) and not _NEED_DENIAL.search(text):
+        return "PRICE_BUDGET"
+    return category
+
+
+@dataclass(frozen=True)
+class LiveUtterance:
+    meeting_id: str
+    speaker: str  # as captioned; "unknown" when the adapter could not read it
+    role: str  # closer | lead | unknown (never guessed from text)
+    text: str
+    timestamp: float  # epoch seconds, from the caption source
+    sequence: int
+    received_at: float  # epoch seconds, when the runtime got it (latency start)
+
+
+@dataclass(frozen=True)
+class LiveConfig:
+    window_seconds: float = 90.0
+    max_window_utterances: int = 12
+    min_lead_chars: int = 12
+    repeat_similarity: float = 0.85  # a lead utterance this similar to the last analyzed one is skipped
+    cooldown_seconds: float = 25.0
+    ttl_seconds: float = 90.0
+    arm: Arm = "E1"
+
+
+@dataclass
+class Recommendation:
+    id: int
+    category: str
+    move: str
+    rationale: str
+    question: str
+    grade: str
+    shown_at: float
+    state: str = "ACTIVE"  # ACTIVE | EXPIRED | REPLACED | DISMISSED
+    # Retrieval provenance, shown in the debug panel: proves which knowledge unit/move was used.
+    knowledge_unit: str | None = None
+    move_id: str | None = None
+    move_code: str | None = None
+
+    def view(self) -> dict[str, Any]:
+        return {"state": self.state, "id": self.id, "category": self.category,
+                "label": LABELS.get(self.category, self.category), "move": self.move,
+                "rationale": self.rationale, "question": self.question, "grade": self.grade,
+                # only GUIDED guidance becomes a Recommendation, so grounding passed by construction
+                "knowledge_unit": self.knowledge_unit, "move_id": self.move_id, "move_code": self.move_code,
+                "grounding": "VALID"}
+
+
+def _ms(seconds: float) -> int:
+    return round(seconds * 1000)
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _fold(text: str) -> str:
+    return unicodedata.normalize("NFKD", _norm(text)).encode("ascii", "ignore").decode()
+
+
+def _usage(provider: Any) -> dict[str, Any]:
+    inner = getattr(provider, "inner", provider)  # ContextGuard wraps the Ollama provider
+    u = getattr(inner, "last_usage", {}) or {}
+    return {"prompt_tokens": u.get("prompt_eval_count"), "output_tokens": u.get("eval_count")}
+
+
+@dataclass
+class LiveSalesSession:
+    meeting_id: str
+    provider: ClassificationProvider
+    knowledge: ObjectionKnowledge
+    classification_kb: Path
+    config: LiveConfig = field(default_factory=LiveConfig)
+    clock: Callable[[], float] = time.time
+    utterances: list[LiveUtterance] = field(default_factory=list)
+    current_recommendation: Recommendation | None = None
+    open_objections: list[str] = field(default_factory=list)
+    last_guidance: Any = None  # the CommercialGuidance behind the current recommendation
+    last_guidance_at: float | None = None
+    timings: list[dict[str, Any]] = field(default_factory=list)
+    _last_analyzed_seq: int = -1
+    _last_analyzed_lead: str = ""
+    # Live analysis queue, latest-wins: at most ONE pending lead utterance (its sequence). A newer
+    # eligible lead line replaces it; closer lines never set it. Every utterance stays in the transcript.
+    pending_lead_seq: int | None = None
+    last_trigger_reason: str | None = None  # why the latest added utterance did (None) or did not trigger
+    _superseded: int = 0  # pending lead lines replaced by a newer one before their analysis started
+    last_outcome: str | None = None  # outcome:reason of the latest finished analysis (sidebar status)
+    # Observability: the analysis running now vs the last one that finished. Never mixed: each names
+    # its own utterance, and a finish swaps both (plus the recommendation) under one lock.
+    active_analysis: dict[str, Any] | None = None
+    last_completed_analysis: dict[str, Any] | None = None
+    _next_id: int = 1
+    _short_ids: dict[int, str] = field(default_factory=dict)
+    lock: threading.RLock = field(default_factory=threading.RLock)
+    # Temporary debug for the first real-Meet tests (`--debug`): stage log + last-event summary for the panel.
+    debug: Callable[..., None] | None = None
+    debug_state: dict[str, Any] = field(default_factory=dict)
+
+    def _dbg(self, tag: str, **fields: Any) -> None:
+        if self.debug:
+            self.debug(tag, **fields)
+
+    # --- input --------------------------------------------------------------------------------
+
+    def add(self, utt: LiveUtterance) -> bool:
+        """Insert in sequence order. False (ignored) for a repeated sequence or a repeated caption."""
+        with self.lock:
+            if any(u.sequence == utt.sequence for u in self.utterances) or not utt.text.strip():
+                return False
+            recent = self.utterances[-3:]
+            if any(u.speaker == utt.speaker and _norm(u.text) == _norm(utt.text) for u in recent):
+                return False
+            i = len(self.utterances)
+            while i and self.utterances[i - 1].sequence > utt.sequence:
+                i -= 1
+            self.utterances.insert(i, utt)
+            self._short_ids[utt.sequence] = f"seg_{len(self._short_ids) + 1}"
+            self.last_trigger_reason = self._trigger_reason(utt)
+            if self.last_trigger_reason is None:
+                if self.pending_lead_seq is not None:
+                    self._superseded += 1
+                self.pending_lead_seq = utt.sequence
+            return True
+
+    def _trigger_reason(self, utt: LiveUtterance) -> str | None:
+        """Only this NEW lead utterance can trigger: None = it becomes the pending analysis, else why not."""
+        if utt.role != "lead":
+            return "NOT_LEAD"
+        if utt.sequence <= self._last_analyzed_seq or (self.pending_lead_seq or -1) > utt.sequence:
+            return "OLDER_THAN_PENDING_OR_ANALYZED"
+        if len(utt.text.strip()) < self.config.min_lead_chars:
+            return "LEAD_UTTERANCE_TOO_SHORT"
+        ratio = difflib.SequenceMatcher(None, _norm(utt.text), self._last_analyzed_lead).ratio()
+        if ratio >= self.config.repeat_similarity:
+            return "REPEAT_OF_LAST_ANALYZED"
+        return None
+
+    def _sid(self, sequence: int) -> str:
+        # Short "seg_<n>" per session, never the raw sequence: the extension's sequences are epoch-ms
+        # (13 digits) and qwen3:8b then answers evidence_segment_ids as integers ([1792615952359]),
+        # which the guidance validator rejects. Same failure as bare "u<n>" ids.
+        return self._short_ids[sequence]
+
+    def transcript(self, n: int = 8) -> list[LiveUtterance]:
+        """The last `n` utterances the session accepted: exactly what the runtime received."""
+        with self.lock:
+            return self.utterances[-n:]
+
+    def recent_window(self) -> list[LiveUtterance]:
+        with self.lock:
+            if not self.utterances:
+                return []
+            newest = self.utterances[-1].timestamp
+            window = [u for u in self.utterances if newest - u.timestamp <= self.config.window_seconds]
+            return window[-self.config.max_window_utterances:]
+
+    @property
+    def current_objection(self) -> str | None:
+        rec = self.current()
+        return rec.category if rec else None
+
+    def should_analyze(self) -> bool:
+        """A pending lead utterance is waiting (set only by a new, eligible lead line)."""
+        with self.lock:
+            return self.pending_lead_seq is not None
+
+    # --- output -------------------------------------------------------------------------------
+
+    def current(self) -> Recommendation | None:
+        """The one active recommendation, or None. Expiry is applied lazily here."""
+        with self.lock:
+            rec = self.current_recommendation
+            if rec and rec.state == "ACTIVE" and self.clock() - rec.shown_at > self.config.ttl_seconds:
+                rec.state = "EXPIRED"
+            return rec if rec and rec.state == "ACTIVE" else None
+
+    def dismiss(self) -> None:
+        with self.lock:
+            if self.current():
+                self.current_recommendation.state = "DISMISSED"
+
+    def mark_displayed(self, rec_id: int) -> None:
+        """First time the panel received this recommendation (end of the end-to-end latency)."""
+        with self.lock:
+            for t in reversed(self.timings):
+                if t.get("recommendation_id") == rec_id:
+                    if t.get("displayed_at") is None:
+                        t["displayed_at"] = self.clock()
+                        t["displayed_latency_ms"] = _ms(t["displayed_at"] - t["caption_received_at"])
+                    return
+
+    # --- analysis -----------------------------------------------------------------------------
+
+    def _window_call(self, window: list[LiveUtterance]) -> Call:
+        t0 = window[0].timestamp
+        roles = {u.speaker: u.role for u in window}
+        return Call(
+            call_id=f"live_{self.meeting_id}", company_id="live", source="google_meet_captions",
+            source_id=self.meeting_id, occurred_at=datetime.fromtimestamp(t0, UTC),
+            duration_seconds=max(window[-1].timestamp - t0, 0.0) + 1.0,
+            participants=[Participant(id=s, name=s, role=r if r in ("closer", "lead") else "unknown")
+                          for s, r in roles.items()],
+            segments=[TranscriptSegment(segment_id=self._sid(u.sequence), segment_index=i, speaker_id=u.speaker,
+                                        start_ts=u.timestamp - t0, end_ts=u.timestamp - t0 + 1.0, text=u.text)
+                      for i, u in enumerate(window)],
+        )
+
+    def analyze(self) -> dict[str, Any]:
+        """One analysis of the rolling window. Returns its timing record (also kept in `timings`).
+
+        `outcome`: RECOMMENDED | KEPT (same category inside the cooldown) | NO_RECOMMENDATION.
+        Ollama, malformed-output and too-large errors are recorded as NO_RECOMMENDATION with reason ERROR:<type>.
+        """
+        with self.lock:
+            # Take the one pending lead (latest wins). Lead lines in the window that were superseded
+            # while waiting are still new and can still anchor the objection; nothing is dropped.
+            trigger = next((u for u in self.utterances if u.sequence == self.pending_lead_seq), None)
+            superseded, self.pending_lead_seq, self._superseded = self._superseded, None, 0
+            window = self.recent_window()
+            new_seqs = ({u.sequence for u in window if u.sequence > self._last_analyzed_seq and u.role == "lead"}
+                        if trigger else set())
+            if window:
+                self._last_analyzed_seq = max(self._last_analyzed_seq, window[-1].sequence)
+            if trigger:
+                self._last_analyzed_lead = _norm(trigger.text)
+            started = self.clock()
+            self.active_analysis = None if trigger is None else {
+                "sequence": trigger.sequence, "segment_id": self._sid(trigger.sequence), "speaker": trigger.speaker,
+                "role": trigger.role, "text_preview": trigger.text[:140], "started_at": started}
+        t: dict[str, Any] = {"sequence": trigger.sequence if trigger else None,
+                             "caption_received_at": trigger.received_at if trigger else started,
+                             "window_utterances": len(window), "superseded_leads": superseded,
+                             "analysis_started_at": started}
+        t["queue_wait_ms"] = _ms(started - t["caption_received_at"])
+        try:
+            outcome, reason = self._decide(window, new_seqs, t)
+        except (OllamaError, MalformedResponseError, InputTooLargeError) as exc:  # live: no recommendation, no crash
+            outcome, reason = "NO_RECOMMENDATION", f"ERROR:{type(exc).__name__}"
+        t.update(outcome=outcome, reason=reason)
+        new_rec = t.pop("_new_rec", None)
+        # Queue wait and inference are reported separately (never mixed).
+        if t.get("classifier_finished_at"):
+            t["classifier_latency_ms"] = _ms(t["classifier_finished_at"] - started)
+        if t.get("guidance_finished_at"):
+            t["guidance_latency_ms"] = _ms(t["guidance_finished_at"] - t["classifier_finished_at"])
+        t["end_to_end_latency_ms"] = _ms(self.clock() - t["caption_received_at"])  # caption -> outcome ready
+        with self.lock:  # one atomic swap: recommendation, active -> None, last completed -> this result
+            if new_rec is not None:
+                if self.current_recommendation and self.current_recommendation.state == "ACTIVE":
+                    self.current_recommendation.state = "REPLACED"
+                self.current_recommendation = new_rec
+            self.last_outcome = f"{outcome}:{reason}"
+            self.last_completed_analysis = {
+                "sequence": t["sequence"], "segment_id": self._sid(t["sequence"]) if t["sequence"] is not None else None,
+                "category": t.get("category"), "outcome": outcome, "reason": reason, "finished_at": self.clock()}
+            self.active_analysis = None
+            self.timings.append(t)
+        self._dbg("POLICY" if outcome != "RECOMMENDED" else "STATE", outcome=outcome, reason=reason,
+                  segment=self.last_completed_analysis["segment_id"],
+                  recommendation=(self.current_recommendation.state if self.current_recommendation else "NONE"))
+        return t
+
+    def _decide(self, window: list[LiveUtterance], new_seqs: set[int], t: dict[str, Any]) -> tuple[str, str]:
+        if not new_seqs:
+            return "NO_RECOMMENDATION", "NO_PENDING_LEAD_UTTERANCE"
+        call = self._window_call(window)
+        run = classify_call(call, self.config.arm, self.provider, self.classification_kb)
+        t.update(classifier_finished_at=self.clock(), classifier=_usage(self.provider),
+                 episodes=len(run.episodes))
+        self._dbg("CLASSIFIER", detection=run.call_detection, validation_errors=list(run.validation_errors),
+                  episodes=[{"category": e.category, "status": e.category_status, "objection": e.objection_segment_ids,
+                             "context": e.context_segment_ids} for e in run.episodes],
+                  new_lead_ids=sorted(self._sid(s) for s in new_seqs), usage=t["classifier"], raw=run.raw_response)
+        # Live: the trigger is the newest utterance, so the model tends to cite the lines *before* it
+        # as context, which the classifier contract forbids. Keep only post-anchor context (less
+        # evidence, never more) and re-run the classifier's own validator; still invalid -> nothing.
+        order = {seg.segment_id: seg.segment_index for seg in call.segments}
+        episodes = tuple(dataclasses.replace(e, context_segment_ids=tuple(
+            c for c in e.context_segment_ids if order.get(c, -1) > order.get(e.anchor_segment_id, -1)))
+            for e in run.episodes)
+        if errors := validate_predictions(call, run.call_detection, episodes, run.uncertain_spans):
+            self._dbg("CLASSIFIER", status="INVALID", errors=list(errors))
+            return "NO_RECOMMENDATION", "CLASSIFIER_INVALID"
+        if run.call_detection != "OBJECTIONS_FOUND":
+            return "NO_RECOMMENDATION", "NO_OBJECTION"
+        new_ids = {self._sid(s) for s in new_seqs}
+        candidates = [e for e in episodes if self._qualifies(e, new_ids)]
+        categories = {e.category for e in candidates}
+        if not candidates:
+            return "NO_RECOMMENDATION", "NO_QUALIFYING_EPISODE"
+        if len(categories) > 1:
+            return "NO_RECOMMENDATION", "AMBIGUOUS_CATEGORIES"
+        episode = candidates[0]
+        objection_text = " ".join(seg.text for seg in call.segments if seg.segment_id in episode.objection_segment_ids)
+        category = price_override(episode.category, objection_text)
+        if category != episode.category:
+            t["category_before"] = episode.category
+            self._dbg("CLASSIFIER", category_normalized=f"{episode.category} -> {category}",
+                      reason="explicit price words in the objection evidence")
+            episode = dataclasses.replace(episode, category=category)
+        cues = CORROBORATION.get(episode.category)
+        if cues:
+            said = " ".join(_fold(seg.text) for seg in call.segments if seg.segment_id in episode.objection_segment_ids)
+            if not any(c in said for c in cues):
+                t["category"] = episode.category
+                return "NO_RECOMMENDATION", "UNCORROBORATED_CATEGORY"
+        t["category"] = episode.category
+        current = self.current()
+        if (current and current.category == episode.category
+                and self.clock() - current.shown_at < self.config.cooldown_seconds):
+            return "KEPT", "COOLDOWN"
+        # Guidance evidence, two scopes (CommercialGuidance and grounding unchanged):
+        # - objection evidence = the episode's objection segments (what the panel quotes);
+        # - allowed factual call evidence = every captured segment of this window. The classifier
+        #   contract keeps only post-anchor context, but a fact the lead said a moment earlier ("Hoje a
+        #   gente perde tempo...") is real call text; grounding checks against it, knowledge never counts.
+        factual = tuple(seg.segment_id for seg in call.segments if seg.segment_id not in episode.objection_segment_ids)
+        guidance_episode = dataclasses.replace(episode, context_segment_ids=factual)
+        self._dbg("POLICY", emit=True, category=episode.category, anchor=episode.objection_segment_ids[0],
+                  objection_evidence=list(episode.objection_segment_ids), factual_evidence=list(factual))
+        guidance = guide_episode(call, guidance_episode, self.knowledge, self.provider)
+        t.update(guidance_finished_at=self.clock(), guidance=_usage(self.provider))
+        self._dbg("GUIDANCE", status=guidance.status, errors=list(guidance.errors), usage=t["guidance"],
+                  move=guidance.knowledge_move_id)
+        self._dbg("GROUNDING", valid=not any("ungrounded" in e for e in guidance.errors),
+                  errors=[e for e in guidance.errors if "ungrounded" in e])
+        if guidance.status != "GUIDED":
+            return "NO_RECOMMENDATION", f"GUIDANCE_{guidance.status}"
+        with self.lock:  # built here, made current by analyze() in the same swap as last_completed_analysis
+            g = guidance.generated_guidance
+            t["_new_rec"] = Recommendation(
+                id=self._next_id, category=episode.category,
+                move=_action(guidance.recommended_move.code, _generic(guidance.recommended_move.guidance),
+                             g.suggested_question),
+                rationale=_first_sentence(g.rationale), question=g.suggested_question, grade=guidance.knowledge_grade,
+                shown_at=self.clock(), knowledge_unit=guidance.knowledge_unit_id,
+                move_id=guidance.knowledge_move_id, move_code=guidance.recommended_move.code)
+            self._next_id += 1
+            self.last_guidance, self.last_guidance_at = guidance, self.clock()
+            if episode.category not in self.open_objections:
+                self.open_objections.append(episode.category)
+            t["recommendation_id"] = t["_new_rec"].id
+        return "RECOMMENDED", "GUIDED"
+
+    @staticmethod
+    def _qualifies(e: EpisodePrediction, new_ids: set[str]) -> bool:
+        return (e.category_status == "PRESENT" and e.category in LABELS
+                and bool(set(e.objection_segment_ids) & new_ids))

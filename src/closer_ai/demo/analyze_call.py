@@ -15,26 +15,31 @@ Speaker labels are `closer`, `lead` or `other`, or any label mapped with `--role
 guess. Timestamps are synthetic (10 s per line); the Call carries the `synthetic_timestamps` flag.
 
 Per input file: `<name>.json` + `<name>.md`; per run: `review_sheet.csv` (one row per file, human
-columns empty) and a SUCCESS / INVALID / INPUT_TOO_LARGE / ERROR summary.
+columns empty) and a summary per status (`STATUSES`).
 
-No silent truncation: every prompt goes through `ContextGuard`, which refuses (INPUT_TOO_LARGE) a
-prompt that may not fit the model context, before sending it (conservative estimate) and after
-(Ollama's reported prompt tokens). Nothing is chunked, summarized or cut; the call is not analyzed. Outputs contain transcript quotes: inside this
+No silent truncation: every prompt goes through `ContextGuard`, which refuses a prompt that may not
+fit the model context, before sending it (conservative estimate) and after (Ollama's reported
+prompt tokens). A call whose prompt does not fit is processed in chunks of whole utterances
+(`long_call`, automatic); only an utterance that alone does not fit gives INPUT_TOO_LARGE. Nothing
+is summarized or cut. Transcripts are read as UTF-8, with or without BOM. Outputs contain transcript quotes: inside this
 repository they may only go under the gitignored `artifacts/`; real calls belong outside it.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import math
 import sys
+import urllib.error
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from closer_ai.ai.objection_guidance import load_objection_knowledge
 from closer_ai.ai.ollama_provider import DEFAULT_BASE_URL, OllamaClassificationProvider, OllamaError
-from closer_ai.ai.post_call import PostCallIntelligence, analyze_call, render_markdown
+from closer_ai.ai.post_call import PostCallIntelligence, render_markdown
+from closer_ai.demo.long_call import ChunkTooLargeError, analyze_call_auto
 from closer_ai.normalization.models import Call
 from closer_ai.normalization.normalize import normalize_call
 
@@ -46,11 +51,11 @@ _SECONDS_PER_LINE = 10.0
 
 REVIEW_COLUMNS = (
     "source_file", "call_id", "detected_category", "recommended_move", "knowledge_grade",
-    "next_step_detected", "risk_count", "pipeline_status",
+    "next_step_detected", "risk_count", "pipeline_status", "processing_mode", "chunk_count",
     "human_category_correct", "human_guidance_useful", "human_guidance_grounded",
     "human_next_step_correct", "human_better_recommendation", "human_error_category", "human_notes",
 )
-STATUSES = ("SUCCESS", "INVALID", "INPUT_TOO_LARGE", "ERROR")
+STATUSES = ("SUCCESS", "INVALID", "INPUT_TOO_LARGE", "OLLAMA_TIMEOUT", "OLLAMA_UNREACHABLE", "ERROR")
 DEFAULT_NUM_CTX = 16384
 # Measured on qwen3:8b with these prompts: 3.1-3.6 chars/token. 2.5 overestimates tokens on purpose.
 CHARS_PER_TOKEN_ESTIMATE = 2.5
@@ -75,6 +80,12 @@ class ContextGuard:
         self.budget = num_ctx - reserve_tokens
         self.chars_per_token = chars_per_token
         self.name, self.model = inner.name, inner.model
+        self.calls = 0  # LLM calls actually sent (observability for the pilot)
+
+    @property
+    def max_prompt_chars(self) -> int:
+        """Longest prompt the estimate accepts; the long-call planner sizes chunks with it."""
+        return math.floor(self.budget * self.chars_per_token)
 
     def classify(self, prompt: str) -> Any:
         estimate = math.ceil(len(prompt) / self.chars_per_token)
@@ -82,6 +93,7 @@ class ContextGuard:
             raise InputTooLargeError(
                 f"prompt ~{estimate} tokens (estimate) exceeds the budget of {self.budget} "
                 f"(num_ctx {self.num_ctx} - output reserve); call not analyzed, nothing truncated")
+        self.calls += 1
         result = self.inner.classify(prompt)
         used = getattr(self.inner, "last_usage", {}).get("prompt_eval_count")
         if isinstance(used, int) and used > self.budget:
@@ -146,8 +158,25 @@ def review_row(source_file: str, pci: PostCallIntelligence | None, failure: str 
             next_step_detected="yes" if pci.next_steps else "no",
             risk_count=str(len(pci.risks)),
             pipeline_status=pci.pipeline_status,
+            processing_mode=str(pci.provenance.get("processing_mode", "")),
+            chunk_count=str(pci.provenance.get("chunk_count", "")),
         )
     return row
+
+
+def failure_status(exc: BaseException) -> str:
+    """Pipeline status for an exception. Uses the chained cause, so a timeout is never 'unreachable'."""
+    if isinstance(exc, (InputTooLargeError, ChunkTooLargeError)):
+        return "INPUT_TOO_LARGE"
+    if isinstance(exc, OllamaError):
+        cause = exc.__cause__
+        if isinstance(cause, urllib.error.URLError) and not isinstance(cause, urllib.error.HTTPError):
+            cause = cause.reason
+        if isinstance(cause, TimeoutError):
+            return "OLLAMA_TIMEOUT"
+        if isinstance(cause, (ConnectionError, OSError)) and not isinstance(cause, urllib.error.HTTPError):
+            return "OLLAMA_UNREACHABLE"
+    return "ERROR"
 
 
 def _inside(path: Path, parent: Path) -> bool:
@@ -173,27 +202,34 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"--out-dir {out_dir} is inside the repository; use artifacts/ or a folder outside it")
     roles = parse_roles(args.roles)
     files = [f for p in args.paths for f in (sorted(p.glob("*.txt")) if p.is_dir() else [p])]
-    provider = ContextGuard(OllamaClassificationProvider(args.model, base_url=args.base_url, num_ctx=args.num_ctx),
-                            num_ctx=args.num_ctx)
+    ollama = OllamaClassificationProvider(args.model, base_url=args.base_url, num_ctx=args.num_ctx)
+    provider = ContextGuard(ollama, num_ctx=args.num_ctx)
     guidance_kb = load_objection_knowledge(GUIDANCE_KB)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = []
     for path in files:
+        calls_before = provider.calls
         try:
-            call = parse_transcript(path.read_text(encoding="utf-8"), source_id=path.stem, roles=roles)
-            pci = analyze_call(call, provider, CLASSIFICATION_KB, guidance_kb, arm=args.arm)
+            call = parse_transcript(path.read_text(encoding="utf-8-sig"), source_id=path.stem, roles=roles)
+            pci = analyze_call_auto(call, provider, CLASSIFICATION_KB, guidance_kb,
+                                    max_prompt_chars=provider.max_prompt_chars, arm=args.arm)
         except (ValueError, OSError, OllamaError) as exc:
-            status = "INPUT_TOO_LARGE" if isinstance(exc, InputTooLargeError) else "ERROR"
+            status = failure_status(exc)
             rows.append(review_row(path.name, None, failure=status))
-            print(f"{status:<8} {path.name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            detail = (f"no answer within {getattr(ollama, 'timeout', '?')}s (request timed out)"
+                      if status == "OLLAMA_TIMEOUT" else f"{type(exc).__name__}: {exc}")
+            print(f"{status:<8} {path.name}: {detail}", file=sys.stderr)
             if not args.continue_on_error:
                 break
             continue
+        pci = dataclasses.replace(pci, provenance={**pci.provenance, "llm_calls": provider.calls - calls_before})
         (out_dir / f"{path.stem}.json").write_text(pci.to_json() + "\n", encoding="utf-8")
         (out_dir / f"{path.stem}.md").write_text(render_markdown(pci), encoding="utf-8")
         rows.append(review_row(path.name, pci))
-        print(f"{pci.pipeline_status:<8} {path.name} -> {out_dir / path.stem}.{{json,md}}", file=sys.stderr)
+        p = pci.provenance
+        print(f"{pci.pipeline_status:<8} {path.name} [{p['processing_mode']}, {p['chunk_count']} chunk(s), "
+              f"{p['llm_calls']} LLM calls] -> {out_dir / path.stem}.{{json,md}}", file=sys.stderr)
 
     with (out_dir / "review_sheet.csv").open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=REVIEW_COLUMNS)
@@ -203,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     skipped = len(files) - len(rows)
     print(f"summary: {' '.join(f'{k}={v}' for k, v in counts.items())}"
           f"{f' NOT_RUN={skipped}' if skipped else ''} -> {out_dir / 'review_sheet.csv'}", file=sys.stderr)
-    return 1 if counts["ERROR"] or counts["INPUT_TOO_LARGE"] else 0
+    return 1 if any(counts[s] for s in STATUSES if s not in ("SUCCESS", "INVALID")) else 0
 
 
 if __name__ == "__main__":
