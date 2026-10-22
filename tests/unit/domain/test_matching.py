@@ -279,7 +279,7 @@ def test_call_deal_match_frozen():
 
 def test_call_deal_match_rejects_naive_created_at():
     with pytest.raises(ValidationError):
-        _match(created_at=datetime(2026, 2, 1, 9, 0))  # noqa: DTZ001 - naive on purpose
+        _match(created_at=datetime(2026, 2, 1, 9, 0))  # noqa: DTZ001 - naive datetime is the behavior under test
 
 
 # --- documented gaps (Evaluator, hardening round): not bugs, not fixed here, but must not
