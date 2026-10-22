@@ -1,0 +1,58 @@
+{
+  "id": "guidance.IMPLEMENTATION_INTEGRATION",
+  "category": "IMPLEMENTATION_INTEGRATION",
+  "version": "1.0",
+  "source_section": "3.7 IMPLEMENTATION_INTEGRATION",
+  "typical_phrases": [
+    "Não tenho tempo pra aplicar.",
+    "Minha equipe não vai conseguir tocar isso.",
+    "Não tenho gente pra isso.",
+    "Não é o formato que eu preciso.",
+    "Prefiro algo presencial."
+  ],
+  "recommended_moves": [
+    {
+      "id": "IMPLEMENTATION_INTEGRATION.M1",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"Quantas horas por semana isso leva de quem vai tocar?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "IMPLEMENTATION_INTEGRATION.M2",
+      "code": "ADDRESS_EXPLAIN",
+      "guidance": "Expectativa do começo: \"No primeiro mês a meta é X; você não precisa de Y pra começar.\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "IMPLEMENTATION_INTEGRATION.M3",
+      "code": "ADDRESS_EXPLAIN",
+      "guidance": "Responsável nomeado, só se o acompanhamento existir de fato.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "IMPLEMENTATION_INTEGRATION.M4",
+      "code": "CLARIFY",
+      "guidance": "\"Qual formato funciona pra você?\" Se nenhum servir, dizer.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "IMPLEMENTATION_INTEGRATION.D1",
+      "guidance": "Prometer resultado sem o custo de capacidade.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (JOLT)",
+      "source_ids": []
+    }
+  ],
+  "evidence_source_ids": [],
+  "notes": "Só \"expectations overload\" em JOLT (WEAK). Nenhuma fonte sobre tempo ou formato: NOT SUPPORTED BY CURRENT SOURCES."
+}

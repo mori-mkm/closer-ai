@@ -1,0 +1,23 @@
+{
+  "document": "docs/research/AI_CLOSER_OBJECOES_DE_VENDAS_E_CONTORNOS_2026_10_14.md",
+  "document_sha256": "aa1a431a1101925143e8976e29fbe68c71ed36b860736907e15082cd517b352c",
+  "note": "Only the finding IDs cited by the guidance units. Text abridged from section 2 of the research; grade as assigned there.",
+  "sources": {
+    "N1": {"finding": "Ganho por call em que o preço surgiu: nenhuma menção 5%; call 1 42%; call 3 15% (Gong Labs 2020, 11.331 oportunidades)", "grade": "MODERATE"},
+    "N2": {"finding": "Orçamento na call 1: 49% de ganho; nunca citado: 7% (Gong Labs 2020)", "grade": "MODERATE"},
+    "N5": {"finding": "Top reps pausam mais após objeção (Gong Labs 2018, 67.149 demos)", "grade": "MODERATE"},
+    "N10": {"finding": "ROI apresentado na call: fechamento 27% menor (Gong stats 2021, amostra não declarada)", "grade": "WEAK"},
+    "N12": {"finding": "Concorrente citado cedo: \"49% maior chance de fechar\" (Gong, base não declarada)", "grade": "WEAK"},
+    "N13": {"finding": "Decisor ausente: SMB \"80% menos provável\" de fechar (Gong stats 2021; forma ambígua)", "grade": "WEAK"},
+    "N14": {"finding": "Deals mais rápidos gastam 53% mais tempo em próximos passos na 1ª reunião (Gong stats 2021)", "grade": "WEAK"},
+    "N16": {"finding": "Mimetismo melhora resultados de negociação; confiança como mediador (Maddux et al. 2008, laboratório)", "grade": "MODERATE"},
+    "N17": {"finding": "Nomear a emoção reduz a resposta da amígdala (Lieberman et al. 2007; mecanismo, sem desfecho de venda)", "grade": "MODERATE"},
+    "N20": {"finding": "Vendedores superponderam sinais de desinteresse; regra de parada (Manzoor et al. 2025, preprint)", "grade": "WEAK"},
+    "N25": {"finding": "74% das equipes de compra B2B têm \"unhealthy conflict\" na decisão (Gartner 2025, lido por trecho)", "grade": "MODERATE"},
+    "N26": {"finding": "Ambush aparece mais na memória induzida que na espontânea (REMark 2016)", "grade": "MODERATE"},
+    "N28": {"finding": "Desconto de 20% exige win rate subir de 20% para 25% para manter receita (Winning by Design; modelo hipotético)", "grade": "WEAK"},
+    "N29": {"finding": "Indecisão presente em ~9 de 10 calls (Challenger 2024; prevalência)", "grade": "MODERATE"},
+    "N30": {"finding": "40–60% dos negócios terminam em \"no decision\" (JOLT, via resumos secundários)", "grade": "WEAK"},
+    "N31": {"finding": "Um rep com 15% de objeções \"mau momento\" contra 7,8% do time (Outreach, n = 1)", "grade": "WEAK"}
+  }
+}

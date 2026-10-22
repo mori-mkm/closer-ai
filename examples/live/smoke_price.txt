@@ -1,0 +1,5 @@
+# Synthetic live stream (invented; no real person/company).
+closer: Como vocês fazem isso hoje?
+lead: A gente perde bastante tempo com isso.
+closer: Entendi.
+lead: Gostei da proposta, mas achei muito caro.

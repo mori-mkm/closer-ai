@@ -5,16 +5,20 @@ Reconciliar o documento inteiro; não empilhar correções no fim._
 
 ## Snapshot
 
-- Data do snapshot: 2026-09-29 (reconciliação de arquitetura/documentação)
-- Code baseline reviewed: `50c13e9` (merge do PR #36, Experiment Runner)
-- Tests: **592 passed** (`pytest -q`): normalization 44, ingestion 78, domain 275, ai 185,
-  integration 10. Todos herméticos: nenhum teste exige Ollama, rede ou dado real
+- Data do snapshot: 2026-10-21 (fechamento do Live Meet Copilot v0)
+- Code baseline reviewed: `f54ea28` (Objection Guidance Engine v0) + checkpoint Live Meet Copilot v0
+- Tests: **732 passed** (`pytest -q`) após Objection Guidance Engine v0/v0.1 + Live Meet Copilot v0
+  (+140 sobre 592: guidance, grounding, post-call, CLI/pilot runner, long-call chunking, live session).
+  Extensão: `node --test` em `extensions/google-meet/meet_adapter.test.js` (5) e
+  `sidebar_view.test.js` (5). Todos herméticos: nenhum teste exige Ollama, rede ou dado real
 - Lint: `ruff check .` limpo
 - CI: `.github/workflows/ci.yml` (import sanity check, `ruff check .`, `pytest -q`) em toda PR e
   push para `main`
 - Branch protection no GitHub: **não verificável localmente** (TD-12)
 
-Testes passando não significam produção. Nenhum componente abaixo foi validado com dado real.
+Testes passando não significam produção. Nenhum componente abaixo foi validado com dado real de
+cliente. Exceção parcial: o Live Meet Copilot v0 rodou ponta a ponta em um Google Meet real de teste
+(contas próprias, sem cliente).
 
 ## Product thesis
 
@@ -61,6 +65,8 @@ Canonical Call ─► prompt E0 / E1 / E2 ◄───────────�
 | Knowledge Context Builder v0.1 | `src/closer_ai/ai/knowledge_context.py`; [doc](../ai/KNOWLEDGE_CONTEXT_BUILDER_V0_1.md) | full-context (8 cards), sem retrieval; RAG-O4 aberta |
 | Objection Classifier core + braços E0/E1/E2 | `src/closer_ai/ai/objection_classifier.py`; [doc](../ai/OBJECTION_CLASSIFIER_RUNNER_V0_1.md) | eval layer; predições ≠ `ObjectionEpisode` ≠ gold; labels CIT-O1, não enum do domínio |
 | Ollama Classification Provider v0.1 (local-only) | `src/closer_ai/ai/ollama_provider.py`; [doc](../ai/OLLAMA_CLASSIFICATION_PROVIDER_V0_1.md); [ADR-005](../decisions/ADR_005-classification-provider-boundary.md) | loopback only; sem retry/reparo; nenhum provider cloud |
+| Objection Guidance Engine v0 + Post-call Intelligence v0 (Value Sprint) | `src/closer_ai/ai/{objection_guidance,post_call}.py`, `src/closer_ai/demo/analyze_call.py`, `docs/knowledge/sales/guidance/`; [doc](../ai/OBJECTION_GUIDANCE_ENGINE_V0.md) | vertical slice sintético; retrieval = lookup por categoria; grounding lexical fail-closed; pilot runner + truncation guard + pilot summary prontos ([pilot](../product/REAL_CALL_PILOT.md)), bloqueado por autorização; graus da pesquisa preservados (nenhum movimento com taxa medida); **sem avaliação de qualidade** |
+| Live Meet Copilot v0 (prioridade de produto) | `src/closer_ai/live/`, `extensions/google-meet/`; [doc](../product/LIVE_MEET_COPILOT_V0.md) | **validado ponta a ponta em Meet real de teste (2026-10-21)**: captions → speaker/role → classifier E1 @ 4k → normalização `price_override` → policy → knowledge por categoria exata → CommercialGuidance → grounding VALID → recomendação ACTIVE na sidebar (PRICE_BUDGET, move CLARIFY). Fila latest-wins, `active_analysis` vs `last_completed_analysis`, `--debug`. Limites: ~16–25 s por recomendação; só 1 objeção validada ao vivo; precisão medida só em 12 frases sintéticas; calls longas reais não validadas; sem Playbook Compliance / Opportunity Detection / Manager Intelligence; backlog B1–B3 no [doc](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented) |
 | Experiment Runner v0.1 | `src/closer_ai/ai/experiment_runner.py`; [doc](../ai/EXPERIMENT_RUNNER_V0_1.md) | compliance operacional + proveniência; **sem métricas de qualidade**; artifacts privacy-first em `artifacts/` (gitignored) |
 | Privacy boundary + OCI shared storage foundation | [ADR-004](../decisions/ADR_004-real-data-privacy-boundary.md); `docs/data/` | OCI provisionado e smoke-tested **só com dado sintético**; nenhum dado real enviado |
 | Agent harness + CI | `.claude/agents/`, `docs/agents/`, `.github/workflows/ci.yml` | — |
@@ -93,8 +99,10 @@ Isso **não** mede acurácia nem qualidade, **não** valida RAG nem taxonomia e 
 - `ObjectionEpisode` v1 no domínio; migração do enum de objeção (D7).
 - Policy comercial real do Outcome; adapters reais (Kommo/CRM, Zoom); ingestão Empreende.
 - Provider de LLM cloud (e qualquer secret de LLM); remote Ollama.
-- Storage/banco de produto, API/FastAPI, dashboard, realtime/copilot, analytics/Outcome
-  Intelligence, experimentation engine de playbook, deployment/observability.
+- Storage/banco de produto, API/FastAPI, dashboard, analytics/Outcome Intelligence, experimentation
+  engine de playbook, deployment/observability. O copilot ao vivo existe só como v0 local (acima).
+- Playbook Compliance (B2), Opportunity Detection (B3) e Manager Intelligence. B2/B3 dependem do
+  playbook comercial AgroTalento (Gabriel).
 
 Os pacotes vazios `analytics/`, `api/`, `experiments/`, `integrations/` e `storage/` foram removidos
 nesta reconciliação (YAGNI). Serão criados quando houver código real para eles.
@@ -124,7 +132,9 @@ sem enforcement de "sem PII"), TD-12 (branch protection não verificada).
 
 ## Next technical step
 
-**Calibration Dataset Loader v0.1:** carregar as 12 calls do Calibration Kit v0.1 como `Call`s
-canônicas, com os ids do kit, verificadas pelo `segment_sequence_hash` do kit, sem reference
-answers. Depois, análise de compliance das predições inválidas/malformed, ainda sem métricas de
-qualidade. O caminho crítico de produto continua sendo o acesso autorizado a dado real.
+Live Meet Copilot v0 está fechado (validado em Meet real de teste). Próximo passo, a decidir
+entre os itens do backlog no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented):
+B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Opportunity Detection. B2 e
+B3 dependem do playbook comercial AgroTalento (Gabriel). Em paralelo: testar as outras 7 categorias
+ao vivo e uma call longa de teste, ainda sem cliente. O Calibration Dataset Loader v0.1 continua
+pendente.

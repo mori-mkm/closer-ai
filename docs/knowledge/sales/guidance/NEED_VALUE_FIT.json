@@ -1,0 +1,66 @@
+{
+  "id": "guidance.NEED_VALUE_FIT",
+  "category": "NEED_VALUE_FIT",
+  "version": "1.0",
+  "source_section": "3.3 NEED_VALUE_FIT",
+  "typical_phrases": [
+    "Isso não é pra o meu tamanho.",
+    "Sou pequeno, é pra empresa grande.",
+    "Já faço isso internamente.",
+    "Não vejo valor nisso.",
+    "No meu setor é diferente."
+  ],
+  "recommended_moves": [
+    {
+      "id": "NEED_VALUE_FIT.M1",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"Como vocês fazem isso hoje, e onde trava?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "NEED_VALUE_FIT.M2",
+      "code": "ACKNOWLEDGE_VALIDATE",
+      "guidance": "Refletir o gargalo nos termos dele: \"Se entendi, o gargalo é Y, não Z. Acertei?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "MODERATE (mecanismo, N17); WEAK (venda)",
+      "source_ids": ["N17"]
+    },
+    {
+      "id": "NEED_VALUE_FIT.M3",
+      "code": "CLARIFY",
+      "guidance": "Para \"já faço\": \"Com o que você tem hoje, qual resultado ainda falta?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "NEED_VALUE_FIT.M4",
+      "code": "PROVIDE_EVIDENCE",
+      "guidance": "Caso de porte ou setor parecido, só se for verificável. Nunca inventar caso.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "NEED_VALUE_FIT.M5",
+      "code": "DEFER_FOLLOW_UP",
+      "guidance": "Desqualificar, encaixe ruim: \"Pelo que você descreveu, isso não resolve o seu caso agora.\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (Inf): inferência da pesquisa, sem fonte",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "NEED_VALUE_FIT.D1",
+      "guidance": "Discutir se ele conhece o próprio porte ou setor.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (prática)",
+      "source_ids": []
+    }
+  ],
+  "evidence_source_ids": [],
+  "notes": "Nenhuma fonte mede efeito sobre esta objeção: NOT SUPPORTED BY CURRENT SOURCES para os movimentos específicos (os graus WEAK acima são o prior do playbook). Inferência da pesquisa: \"sou pequeno\" costuma ser qualificação disfarçada de objeção; o filtro de entrada pesa mais que o script."
+}

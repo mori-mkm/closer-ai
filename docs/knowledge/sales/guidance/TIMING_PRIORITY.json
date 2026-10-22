@@ -1,0 +1,72 @@
+{
+  "id": "guidance.TIMING_PRIORITY",
+  "category": "TIMING_PRIORITY",
+  "version": "1.0",
+  "source_section": "3.2 TIMING_PRIORITY",
+  "typical_phrases": [
+    "Agora não é o momento.",
+    "Deixa eu pensar e te falo.",
+    "Me liga mês que vem.",
+    "Agora é safra, depois a gente vê.",
+    "Preciso ver outras coisas antes."
+  ],
+  "recommended_moves": [
+    {
+      "id": "TIMING_PRIORITY.M1",
+      "code": "PROBE_EXPLORE",
+      "guidance": "\"O que precisaria ser verdade pra você decidir até [data]?\" (JOLT: medir a firmeza.)",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "TIMING_PRIORITY.M2",
+      "code": "CLARIFY",
+      "guidance": "\"Qual critério falta pra você decidir?\" (JOLT: limitar a exploração; não mandar material novo.)",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "TIMING_PRIORITY.M3",
+      "code": "DEFER_FOLLOW_UP",
+      "guidance": "Com gatilho real (safra, ciclo de caixa): data e gatilho fixos. \"Então marcamos [data] pra revisar [X]. Faz sentido?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK",
+      "source_ids": []
+    },
+    {
+      "id": "TIMING_PRIORITY.M4",
+      "code": "DEFER_FOLLOW_UP",
+      "guidance": "Desqualificar, sem gatilho nem data: \"Pelo que você descreveu, não encaixa agora. Prefere que eu encerre ou marcamos uma revisão?\"",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (Inf): inferência da pesquisa, sem fonte",
+      "source_ids": []
+    }
+  ],
+  "do_not": [
+    {
+      "id": "TIMING_PRIORITY.D1",
+      "guidance": "Aceitar \"me liga mês que vem\" sem data.",
+      "evidence_grade": "WEAK",
+      "grade_note": "sem grau explícito na pesquisa; prior WEAK dos playbooks",
+      "source_ids": []
+    },
+    {
+      "id": "TIMING_PRIORITY.D2",
+      "guidance": "Mandar material a cada adiamento.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (JOLT qualitativo)",
+      "source_ids": []
+    },
+    {
+      "id": "TIMING_PRIORITY.D3",
+      "guidance": "Insistir depois de desinteresse explícito.",
+      "evidence_grade": "WEAK",
+      "grade_note": "WEAK (N20, preprint)",
+      "source_ids": ["N20"]
+    }
+  ],
+  "evidence_source_ids": ["N29", "N30", "N31"],
+  "notes": "Indecisão em ~9 de 10 calls (N29, MODERATE para prevalência); \"no decision\" em 40–60% (N30, WEAK); n = 1 (N31, WEAK). Nenhum script de \"não agora\" tem taxa. Inferência da pesquisa: \"safra\" é sazonalidade do agro; nenhuma fonte cobre isso, e a regra \"data + gatilho\" é inferência. Decisão aberta #2: \"vou pensar\" sem data nem critério pode ser TRUST_RISK."
+}
