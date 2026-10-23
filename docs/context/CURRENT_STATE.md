@@ -147,6 +147,10 @@ Commercial State (sem LLM, sem reclassificar; riscos determinísticos; idempoten
 **Latency P1** (branch `perf/live-latency-v1`): fast path determinístico para PRICE/AUTHORITY
 inequívocos (pula só o classifier; displayed ~14,5 s → ~6 s nesses casos, precisão igual); classifier
 menor (qwen3:4b) e contexto reduzido rejeitados; KV q8_0 opcional, não validado. Ver [doc](../product/LIVE_MEET_COPILOT_V0.md#latency-p1-perflive-latency-v1-2026-10-23).
+**Playbook Compliance v1** (branch `feat/playbook-engine-v1`): playbook AgroTalento em JSON versionado
+(61 regras E1–E12 + N/A, `business_status`) e engine determinístico sobre o Commercial State + sinais do closer:
+E3-R1, E4-R1/R2, E6-R1/R2, E10-R1, E12-R1 e proibições lexicais (E4-R5, E1-R5); demais regras `not_evaluated`.
+Só em ••• → Avançado e no Post-call Brief; sem score; Opportunity Detection não implementado.
 Depois, a decidir
 entre os itens do backlog no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented):
 B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Opportunity Detection. B2 e

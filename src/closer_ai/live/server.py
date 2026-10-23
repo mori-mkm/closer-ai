@@ -248,6 +248,7 @@ class Runtime:
             view["transcript"] = [{"role": u.role, "text": u.text, **({"speaker": u.speaker} if self.debug else {})}
                                   for u in s.transcript()]
             view["commercial_state"] = s.commercial.view()  # shown only in the dock's advanced panel
+            view["playbook_compliance"] = s.compliance().view()  # idem (deterministic, ~ms)
             if s.brief is not None:  # after POST /finalize (advanced panel only)
                 view["post_call_brief"] = {"markdown": render_markdown(s.brief), "finalized_at": s.brief.finalized_at}
         if self.debug:
@@ -260,7 +261,7 @@ class Runtime:
                                                               "guidance_latency_ms", "end_to_end_latency_ms",
                                                               "displayed_latency_ms") if k in last},
                              "counters": dict(s.counters), "analysis_error_reasons": dict(s.error_reasons),
-                             "commercial_counters": dict(s.fact_counters),
+                             "commercial_counters": dict(s.fact_counters), "compliance_ms": s.compliance_ms,
                              "fast_path": {**s.fast_path_counters, "by_category": dict(s.fast_path_by_category)},
                              "model_state": self.model_state,
                              "recommendation_state": (s.current_recommendation.state

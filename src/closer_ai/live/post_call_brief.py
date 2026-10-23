@@ -53,11 +53,13 @@ class PostCallBrief:
     risks: tuple[Risk, ...]
     recommendation_stats: dict[str, Any]
     notes: tuple[str, ...] = field(default=())  # coverage caveats (e.g. rebuilt after a restart)
+    playbook_compliance: dict[str, Any] | None = None  # PlaybookComplianceState.view() (see playbook.py)
 
     def to_json(self) -> dict[str, Any]:
         return {"meeting_id": self.meeting_id, "finalized_at": self.finalized_at, "summary": self.summary,
                 **self.facts, "risks": [{**asdict(r), "segment_ids": list(r.segment_ids)} for r in self.risks],
-                "recommendation_stats": self.recommendation_stats, "notes": list(self.notes)}
+                "recommendation_stats": self.recommendation_stats, "notes": list(self.notes),
+                "playbook_compliance": self.playbook_compliance}
 
 
 def _q(value: str) -> str:
@@ -134,13 +136,14 @@ def recommendation_stats(timings: list[dict[str, Any]], counters: dict[str, int]
 
 
 def build_brief(meeting_id: str, facts: dict[str, list[dict[str, Any]]], timings: list[dict[str, Any]],
-                counters: dict[str, int], finalized_at: float, rebuilt: bool = False) -> PostCallBrief:
+                counters: dict[str, int], finalized_at: float, rebuilt: bool = False,
+                compliance: dict[str, Any] | None = None) -> PostCallBrief:
     summary = build_summary(facts)
     if not summary_is_grounded(summary, facts):  # cannot happen with the template; fail closed anyway
         summary = "Resumo indisponível (validação de grounding falhou)."
     notes = (REBUILT_NOTE,) if rebuilt else ()
     return PostCallBrief(meeting_id, finalized_at, summary, {k: list(facts[k]) for k in SECTIONS},
-                         derive_risks(facts), recommendation_stats(timings, counters), notes)
+                         derive_risks(facts), recommendation_stats(timings, counters), notes, compliance)
 
 
 def _fact_line(name: str, f: dict[str, Any]) -> str:
@@ -151,6 +154,27 @@ def _fact_line(name: str, f: dict[str, Any]) -> str:
     else:
         text = f["value"]
     return f"- {text} [{', '.join(f['segment_ids'])}]"
+
+
+def compliance_markdown(c: dict[str, Any]) -> list[str]:
+    """Satisfied (with evidence) / pending / violations / not decidable. No score (v1)."""
+    results = c["rule_results"]
+
+    def lines(status: str, evidence: bool) -> list[str]:
+        return [f"- {r['rule_id']} — {r['title']}" + (f" [{', '.join(r['segment_ids'])}]" if evidence else
+                                                      f": {r['reason']}")
+                for r in results if r["status"] == status
+                and not (status == "PENDING" and r["class"] == "PROHIBITED")] or ["- -"]
+
+    out = ["## Playbook Compliance", f"Playbook: {c['playbook_version']}", "", "### Satisfied",
+           *lines("SATISFIED", True), "", "### Pending", *lines("PENDING", False), "", "### Violations",
+           *([f"- {r['rule_id']} — {r['title']}: {r['reason']} [{', '.join(r['segment_ids'])}]"
+              for r in c["violations"]] or ["- -"])]
+    unknown = [r for r in results if r["status"] == "UNKNOWN"]
+    if unknown:
+        out += ["", "### Not decidable (v1)", *(f"- {r['rule_id']} — {r['title']}: {r['reason']}" for r in unknown)]
+    out += ["", f"- {len(c['not_evaluated'])} regras do playbook ainda sem detector no v1."]
+    return out
 
 
 def render_markdown(brief: PostCallBrief) -> str:
@@ -164,6 +188,8 @@ def render_markdown(brief: PostCallBrief) -> str:
             f"- categories_detected: {', '.join(s['categories_detected']) or '-'}",
             "- recommendations_by_category: " + (", ".join(f"{k}={v}" for k, v in s["recommendations_by_category"].items())
                                                  or "-")]
+    if brief.playbook_compliance is not None:
+        out += ["", *compliance_markdown(brief.playbook_compliance)]
     if brief.notes:
         out += ["", "## Notes", *(f"- {n}" for n in brief.notes)]
     return "\n".join(out) + "\n"

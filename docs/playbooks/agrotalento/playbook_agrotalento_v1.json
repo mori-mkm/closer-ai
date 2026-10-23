@@ -1,0 +1,112 @@
+{
+  "version": "agrotalento-v1",
+  "source": "docs/playbooks/agrotalento/PLAYBOOK_COMERCIAL_AGROTALENTO_v1.md",
+  "stages": [
+    {"id": "E1", "name": "opening", "title": "Abertura"},
+    {"id": "E2", "name": "operation_context", "title": "Contexto da operação"},
+    {"id": "E3", "name": "pain", "title": "Dor"},
+    {"id": "E4", "name": "impact", "title": "Impacto"},
+    {"id": "E5", "name": "urgency", "title": "Urgência e prioridade"},
+    {"id": "E6", "name": "decision", "title": "Decisão"},
+    {"id": "E7", "name": "presentation", "title": "Apresentação"},
+    {"id": "E8", "name": "proof", "title": "Prova e cases"},
+    {"id": "E9", "name": "commercial_terms", "title": "Condições comerciais"},
+    {"id": "E10", "name": "objections", "title": "Objeções"},
+    {"id": "E11", "name": "closing", "title": "Fechamento"},
+    {"id": "E12", "name": "next_step", "title": "Próximo passo"},
+    {"id": "NA", "name": "restrictions", "title": "Restrições gerais"}
+  ],
+  "rules": [
+    {"id": "E1-R1", "stage": "E1", "class": "REQUIRED", "title": "Pergunta de partida", "evidence_type": "opening_question"},
+    {"id": "E1-R2", "stage": "E1", "class": "REQUIRED", "title": "Quem está presente e seu papel", "evidence_type": "participants_confirmed"},
+    {"id": "E1-R3", "stage": "E1", "class": "RECOMMENDED", "title": "Agenda e permissão para parar", "evidence_type": "agenda_stated"},
+    {"id": "E1-R4", "stage": "E1", "class": "RECOMMENDED", "title": "Material pré-call referenciado", "evidence_type": "pre_call_material_referenced"},
+    {"id": "E1-R5", "stage": "E1", "class": "PROHIBITED", "title": "Ano de fundação da Aliança", "evidence_type": "prohibited_phrase",
+     "phrases": ["fundada em 2014", "fundada em 2015", "fundado em 2014", "fundado em 2015"]},
+
+    {"id": "E2-R1", "stage": "E2", "class": "REQUIRED", "title": "Atividade, tamanho e pessoas fixas", "evidence_type": "operation_profile"},
+    {"id": "E2-R2", "stage": "E2", "class": "REQUIRED", "title": "Papel do lead", "evidence_type": "lead_role_identified"},
+    {"id": "E2-R3", "stage": "E2", "class": "RECOMMENDED", "title": "Número que o dono deveria saber", "evidence_type": "owner_number_asked"},
+    {"id": "E2-R4", "stage": "E2", "class": "RECOMMENDED", "title": "Gestor: quem decide e quem paga", "evidence_type": "manager_authority_asked", "applies_when": "lead_is_not_owner"},
+    {"id": "E2-R5", "stage": "E2", "class": "PROHIBITED", "title": "Faturamento seco na abertura", "evidence_type": "blunt_revenue_question"},
+
+    {"id": "E3-R1", "stage": "E3", "class": "REQUIRED", "title": "Dor identificada", "evidence_type": "pain_identified"},
+    {"id": "E3-R2", "stage": "E3", "class": "RECOMMENDED", "title": "Aprofundar a dor", "evidence_type": "pain_deepened"},
+    {"id": "E3-R3", "stage": "E3", "class": "RECOMMENDED", "title": "Dor de cada participante", "evidence_type": "pain_per_participant", "applies_when": "two_participants"},
+    {"id": "E3-R4", "stage": "E3", "class": "PROHIBITED", "title": "Apresentar antes de implicar", "evidence_type": "pitch_before_implication"},
+
+    {"id": "E4-R1", "stage": "E4", "class": "REQUIRED", "title": "Consequência explorada", "evidence_type": "impact_explored"},
+    {"id": "E4-R2", "stage": "E4", "class": "REQUIRED", "title": "Impacto quantificado", "evidence_type": "impact_quantified"},
+    {"id": "E4-R3", "stage": "E4", "class": "RECOMMENDED", "title": "Tie-down do diagnóstico", "evidence_type": "diagnosis_tie_down"},
+    {"id": "E4-R4", "stage": "E4", "class": "RECOMMENDED", "title": "Retomar número sem resposta", "evidence_type": "number_question_retried", "applies_when": "number_question_unanswered"},
+    {"id": "E4-R5", "stage": "E4", "class": "PROHIBITED", "title": "Afirmações absolutas", "evidence_type": "prohibited_phrase",
+     "phrases": ["risco zero", "zero risco", "se paga sozinho", "se paga sozinha", "todo mundo esta endividado", "garanto"]},
+
+    {"id": "E5-R1", "stage": "E5", "class": "REQUIRED", "title": "Prioridade e momento antes do preço", "evidence_type": "timing_checked_before_price"},
+    {"id": "E5-R2", "stage": "E5", "class": "RECOMMENDED", "title": "Gatilho com data", "evidence_type": "dated_trigger"},
+    {"id": "E5-R3", "stage": "E5", "class": "RECOMMENDED", "title": "Urgência biográfica", "evidence_type": "biographic_urgency"},
+    {"id": "E5-R4", "stage": "E5", "class": "PROHIBITED", "title": "Escassez inventada", "evidence_type": "invented_scarcity"},
+
+    {"id": "E6-R1", "stage": "E6", "class": "REQUIRED", "title": "Quem decide identificado", "evidence_type": "decision_authority_identified"},
+    {"id": "E6-R2", "stage": "E6", "class": "REQUIRED", "title": "Plano para envolver o decisor", "evidence_type": "decider_engagement_plan", "applies_when": "other_decider_identified"},
+    {"id": "E6-R3", "stage": "E6", "class": "RECOMMENDED", "title": "Pergunta do mágico", "evidence_type": "three_wishes_question"},
+    {"id": "E6-R4", "stage": "E6", "class": "RECOMMENDED", "title": "Comprometimento de 0 a 10", "evidence_type": "commitment_scale"},
+    {"id": "E6-R5", "stage": "E6", "class": "PROHIBITED", "title": "Insistir em autonomia negada", "evidence_type": "autonomy_insistence"},
+
+    {"id": "E7-R1", "stage": "E7", "class": "REQUIRED", "title": "Pilares, 6 semanas e ritmo do ano", "evidence_type": "program_blocks_presented"},
+    {"id": "E7-R2", "stage": "E7", "class": "REQUIRED", "title": "Entrega ligada à dor", "evidence_type": "delivery_linked_to_pain"},
+    {"id": "E7-R3", "stage": "E7", "class": "RECOMMENDED", "title": "Checagem por bloco", "evidence_type": "block_check"},
+    {"id": "E7-R4", "stage": "E7", "class": "RECOMMENDED", "title": "Dedicação de tempo explicada", "evidence_type": "time_commitment_explained"},
+    {"id": "E7-R5", "stage": "E7", "class": "PROHIBITED", "title": "Apresentar sem dor e impacto", "evidence_type": "pitch_without_discovery"},
+    {"id": "E7-R6", "stage": "E7", "class": "PROHIBITED", "title": "Prometer resultado específico", "evidence_type": "result_promise"},
+
+    {"id": "E8-R1", "stage": "E8", "class": "RECOMMENDED", "title": "Case do pilar da dor", "evidence_type": "case_in_pain_pillar"},
+    {"id": "E8-R2", "stage": "E8", "class": "REQUIRED", "title": "Prova pedida, case nomeado", "evidence_type": "requested_proof_given", "applies_when": "proof_requested"},
+    {"id": "E8-R3", "stage": "E8", "class": "PROHIBITED", "title": "Case ou número inventado", "evidence_type": "invented_case"},
+
+    {"id": "E9-R1", "stage": "E9", "class": "REQUIRED", "title": "Investimento apresentado", "evidence_type": "price_presented", "applies_when": "not_waiting_for_absent_decider"},
+    {"id": "E9-R2", "stage": "E9", "class": "REQUIRED", "title": "Ancoragem antes do número", "evidence_type": "value_anchoring"},
+    {"id": "E9-R3", "stage": "E9", "class": "REQUIRED", "title": "Formas de pagamento com o valor", "evidence_type": "payment_options_presented"},
+    {"id": "E9-R4", "stage": "E9", "class": "REQUIRED", "title": "2ª cadeira mencionada", "evidence_type": "second_chair_mentioned"},
+    {"id": "E9-R5", "stage": "E9", "class": "RECOMMENDED", "title": "Bônus e garantia", "evidence_type": "bonus_and_guarantee"},
+    {"id": "E9-R6", "stage": "E9", "class": "RECOMMENDED", "title": "Preço antes de 70% da call", "evidence_type": "early_price"},
+    {"id": "E9-R7", "stage": "E9", "class": "PROHIBITED", "title": "Abrir o preço pelo desconto", "evidence_type": "discount_first"},
+    {"id": "E9-R8", "stage": "E9", "class": "PROHIBITED", "title": "Condição fora da tabela", "evidence_type": "unauthorized_terms"},
+
+    {"id": "E10-R1", "stage": "E10", "class": "REQUIRED", "title": "Objeção respondida", "evidence_type": "objection_answered", "applies_when": "objection_raised"},
+    {"id": "E10-R2", "stage": "E10", "class": "REQUIRED", "title": "Causa investigada antes de responder", "evidence_type": "objection_cause_investigated", "applies_when": "objection_raised"},
+    {"id": "E10-R3", "stage": "E10", "class": "RECOMMENDED", "title": "Resolução confirmada", "evidence_type": "objection_resolution_checked", "applies_when": "objection_raised"},
+    {"id": "E10-R4", "stage": "E10", "class": "PROHIBITED", "title": "Pressão de prazo antes de investigar", "evidence_type": "deadline_pressure"},
+
+    {"id": "E11-R1", "stage": "E11", "class": "REQUIRED", "title": "Pedido explícito de decisão", "evidence_type": "decision_requested", "applies_when": "price_presented"},
+    {"id": "E11-R2", "stage": "E11", "class": "REQUIRED", "title": "Vou pensar: o que precisa pensar?", "evidence_type": "think_it_over_opened", "applies_when": "lead_wants_to_think"},
+    {"id": "E11-R3", "stage": "E11", "class": "RECOMMENDED", "title": "Recapitulação final", "evidence_type": "final_recap"},
+    {"id": "E11-R4", "stage": "E11", "class": "RECOMMENDED", "title": "Sinal de compra, pedir decisão", "evidence_type": "buying_signal_followed", "applies_when": "buying_signal"},
+    {"id": "E11-R5", "stage": "E11", "class": "PROHIBITED", "title": "Indicação antes do próximo passo", "evidence_type": "early_referral_request"},
+
+    {"id": "E12-R1", "stage": "E12", "class": "REQUIRED", "title": "Próximo passo com data e hora", "evidence_type": "next_step_scheduled"},
+    {"id": "E12-R2", "stage": "E12", "class": "REQUIRED", "title": "Fechou: pagamento, onboarding e Miguel", "evidence_type": "closed_deal_handoff", "applies_when": "deal_closed"},
+    {"id": "E12-R3", "stage": "E12", "class": "RECOMMENDED", "title": "Closer marca o retorno", "evidence_type": "closer_owns_follow_up"},
+    {"id": "E12-R4", "stage": "E12", "class": "PROHIBITED", "title": "Só envio de material", "evidence_type": "material_only_next_step"},
+
+    {"id": "N/A-1", "stage": "NA", "class": "PROHIBITED", "title": "Ofertar fora do ICP ou sem o dono", "evidence_type": "offer_outside_icp"},
+    {"id": "N/A-2", "stage": "NA", "class": "PROHIBITED", "title": "Prometer visita, software ou reembolso", "evidence_type": "unsupported_offer"},
+    {"id": "N/A-3", "stage": "NA", "class": "PROHIBITED", "title": "Prometer o Miguel não confirmado", "evidence_type": "unconfirmed_mentor_promise"}
+  ],
+  "commercial_info": [
+    {"id": "price_full", "value": "R$ 63.000 à vista ou 12x de R$ 6.800", "business_status": "PENDING_CONFIRMATION", "source": "§2.1; §7 item 1"},
+    {"id": "price_cohort", "value": "R$ 53.000 à vista, até 4x sem juros ou 12x de R$ 5.700", "business_status": "PENDING_CONFIRMATION", "source": "§2.1 (a confirmar 1); §7 item 1"},
+    {"id": "price_variants", "value": "variantes de parcelamento praticadas (exigem autorização)", "business_status": "PENDING_CONFIRMATION", "source": "§2.1; §7 item 1"},
+    {"id": "payment_means", "value": "Pix, cartão de crédito, boleto", "business_status": "CONFIRMED", "source": "§2.1"},
+    {"id": "second_chair", "value": "2ª cadeira incluída sem custo adicional (sócio, filho, cônjuge ou braço direito da operação)", "business_status": "CONFIRMED", "source": "§2.1, deck 2026"},
+    {"id": "second_chair_in_person", "value": "2ª cadeira / acompanhante nos encontros presenciais", "business_status": "PENDING_CONFIRMATION", "source": "§2.1 (a confirmar 2); §7 item 2"},
+    {"id": "bonuses", "value": "Mentoria AgroTalento (R$ 7.997), cursos online e ingressos (até R$ 5.000)", "business_status": "CONFIRMED", "source": "§2.1, deck e página pública"},
+    {"id": "seats", "value": "4 a 5 vagas por turma", "business_status": "CONFIRMED", "source": "§2.1"},
+    {"id": "implementation_guarantee", "value": "Garantia de Implementação (6 semanas)", "business_status": "CONFIRMED", "source": "§2.3, deck 2026"},
+    {"id": "guarantee_30_days", "value": "garantia de 30 dias com cancelamento das parcelas seguintes", "business_status": "PENDING_CONFIRMATION", "source": "§2.3; §2.1 (a confirmar 3); §7 item 3"},
+    {"id": "refund_policy", "value": "sem reembolso de pagamentos realizados", "business_status": "CONFIRMED", "source": "§2.1, página pública"},
+    {"id": "named_cases", "value": "cases nomeáveis em call (Turci, Caires e depoimentos)", "business_status": "PENDING_CONFIRMATION", "source": "§7 item 4"},
+    {"id": "time_commitment", "value": "dedicação de ~2 h/semana no projeto", "business_status": "PENDING_CONFIRMATION", "source": "§7 item 5"},
+    {"id": "approved_phrases", "value": "frases aprovadas de §4", "business_status": "PENDING_CONFIRMATION", "source": "§7 item 6"}
+  ]
+}

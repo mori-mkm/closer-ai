@@ -7,6 +7,7 @@
     python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented, extraction latency
     python -m closer_ai.live.bench --authority      # stakeholder discovery answers vs authority blocking objections
     python -m closer_ai.live.bench --latency --repeat 5 --label A --out runs/A.jsonl   # P1 latency matrix
+    python -m closer_ai.live.bench --compliance     # Playbook Compliance growing line by line (one call)
 
 Each run is a fresh meeting: one closer line, then the case's lead line. The lead line goes through
 `Runtime.receive` (background worker, as from the extension), and a poller calls
@@ -96,6 +97,21 @@ METRICS = ("queue_wait_ms", "classifier_latency_ms", "classifier_ollama_ms", "cl
 Q_DECISION = ("closer", "Além de você, alguém participa da decisão?")
 # (name, lines, expected): expected = field -> needles (folded words a fact's key must contain); fields not
 # named must stay empty, except "objections" (the objection engine's, checked only when named).
+COMPLIANCE_CALL = [  # invented AgroTalento-style call (no client content); Playbook Compliance demo
+    ("closer", "Me conta como vocês controlam os custos da fazenda hoje."),
+    ("lead", "Hoje é tudo num processo manual, no caderno."),
+    ("lead", "Isso faz a equipe perder muito tempo."),
+    ("closer", "E quanto tempo vocês perdem com isso?"),
+    ("lead", "A gente perde umas 8 horas por semana."),
+    ("closer", "Além de você, quem participa da decisão?"),
+    ("lead", "Meu sócio."),
+    ("lead", "Gostei, mas achei muito caro."),
+    ("closer", "Quando você diz caro, está comparando com o quê?"),
+    ("closer", "A segunda cadeira é exatamente para o seu sócio."),
+    ("closer", "Isso se paga sozinho."),
+    ("closer", "Eu te ligo terça às 14h para conversarmos com ele."),
+    ("lead", "Fechado, terça às 14h."),
+]
 COMMERCIAL = [
     ("stakeholder", [Q_DECISION, ("lead", "Sim, meu sócio.")], {"stakeholders": ["socio"]}),
     ("pain", [("closer", CLOSER_LINE), ("lead", "Hoje fazemos tudo manualmente.")], {"pain_points": ["manual"]}),
@@ -333,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--precision", action="store_true", help="run the PROBE lines once each instead of the cases")
     p.add_argument("--sequences", action="store_true", help="run the live SEQUENCES (latest-utterance anchoring)")
     p.add_argument("--commercial", action="store_true", help="run the COMMERCIAL cases (Commercial State v0)")
+    p.add_argument("--compliance", action="store_true", help="stream COMPLIANCE_CALL, print compliance per line")
     p.add_argument("--no-commercial", action="store_true", help="disable commercial facts extraction (A/B)")
     p.add_argument("--authority", action="store_true", help="run the AUTHORITY_MATRIX (discovery vs blocking)")
     p.add_argument("--latency", action="store_true", help="run the LATENCY matrix (per-stage timings + accuracy)")
@@ -427,6 +444,25 @@ def main(argv: list[str] | None = None) -> int:
             "discovery_false_positives": f"{sum(not r['ok'] for r in disc)}/{len(disc)}",
             "blocking_shown": f"{sum(r['ok'] for r in block)}/{len(block)}",
         }}, indent=1), flush=True)
+        return 0
+
+    if a.compliance:
+        mid, base = f"compliance-{time.time():.0f}", time.time() - 120
+        for seq, (role, text) in enumerate(COMPLIANCE_CALL, 1):
+            runtime.receive(parse_utterance({"meeting_id": mid, "speaker": "Closer Teste" if role == "closer"
+                                             else "Lead Teste", "text": text, "timestamp": base + seq * 8,
+                                             "sequence": seq}, runtime.closer_names, base + seq * 8),
+                            background=False)
+            s = runtime.sessions[mid]
+            c = s.compliance()
+            print(json.dumps({"seg": f"seg_{seq}", "role": role, "text": text,
+                              "recommendation": s.current().category if s.current() else None,
+                              "rules": {r.rule_id: f"{r.status} {list(r.segment_ids)}" for r in c.rule_results
+                                        if not (r.status == "PENDING" and c.rules[r.rule_id].rule_class == "PROHIBITED")},
+                              "compliance_ms": s.compliance_ms}, ensure_ascii=False), flush=True)
+        print(json.dumps({"commercial_state": runtime.sessions[mid].commercial.view(),
+                          "playbook_compliance": runtime.sessions[mid].compliance().view()},
+                         ensure_ascii=False, indent=1), flush=True)
         return 0
 
     if a.commercial:

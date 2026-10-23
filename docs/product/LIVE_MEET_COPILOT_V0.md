@@ -639,6 +639,70 @@ Matrix: 14 invented scenarios × 5 runs, warm, Commercial State off.
   - A separate classifier `num_ctx` on the same model would make Ollama reload the model, so it was
     not tried.
 
+## Playbook Compliance v1 (`feat/playbook-engine-v1`, 2026-10-23)
+
+    Commercial State = facts        Compliance Engine = evaluation of those facts against the playbook
+
+Sources:
+- **Human source of truth:** `docs/playbooks/agrotalento/PLAYBOOK_COMERCIAL_AGROTALENTO_v1.md`.
+- **Runtime source:** `playbook_agrotalento_v1.json`, next to it, validated at load
+  (`closer_ai.live.playbook`). The Markdown is never parsed at runtime.
+- **What the JSON holds:**
+  - 12 stages (E1–E12, plus NA);
+  - 61 rules, each with its playbook ID, `class` (REQUIRED / RECOMMENDED / OPTIONAL / PROHIBITED), a
+    short title, an `evidence_type` and an optional `applies_when` (conditional rules can be
+    NOT_APPLICABLE);
+  - `commercial_info` with a `business_status` (CONFIRMED / PENDING_CONFIRMATION).
+- **Business status:** only CONFIRMED items are returned by `Playbook.authorized_commercial_info()`.
+  Pending ones (cohort price, 2nd chair at in-person meetings, 30-day guarantee, named cases, time
+  commitment, §4 phrases) cannot be used as authorized facts. No guidance consumes the playbook yet.
+
+How it is evaluated: `evaluate(playbook, CommercialState.view(), transcript)`.
+- It is pure and deterministic, with no LLM.
+- It is recomputed when read: `GET /recommendation` (Avançado panel) and `POST /finalize` (brief).
+  It is therefore idempotent and cumulative, and rebuilt for free after a restart.
+- It costs about 0.2–0.6 ms per evaluation in the synthetic call (2.7 ms on the first, which loads
+  the JSON), and it is never on the recommendation's path.
+- Each result has `rule_id`, `status` (PENDING / SATISFIED / VIOLATED / NOT_APPLICABLE / UNKNOWN),
+  `segment_ids` and `reason`.
+- SATISFIED or VIOLATED without segment ids is impossible: `ComplianceResult` raises.
+
+| Rule | Evidence (v1) |
+|---|---|
+| E3-R1 Dor identificada | a `pain_points` fact (same segment ids) |
+| E4-R1 Consequência explorada | an `impacts` fact (qualitative is enough) |
+| E4-R2 Impacto quantificado | a number + unit inside the lead's own impact words ("8 horas", "R$ 10 mil", "15%"); "muito tempo" never |
+| E6-R1 Quem decide identificado | a stakeholder with a decision role, or a `decision_process` fact |
+| E6-R2 Plano para envolver o decisor | a decider is known AND (a meeting with that decider with date + time, OR the closer offers the 2nd chair); no decider besides the lead → NOT_APPLICABLE; presence/absence is never inferred |
+| E10-R1 Objeção respondida | each objection from the objection engine (never re-classified) is followed by a closer line |
+| E10-R2 Causa investigada | UNKNOWN: no reliable deterministic signal in v1 |
+| E12-R1 Próximo passo com data e hora | a closer line, or a lead next-step fact (and the line it confirms), with a date AND a time AND a next-step cue; "semana que vem" never; owner only when explicit ("eu te ligo") |
+| E4-R5, E1-R5 (PROHIBITED) | the closer says a listed phrase ("risco zero", "se paga sozinho", "garanto", …), not negated ("não garanto") |
+
+The other 51 rules are listed in `not_evaluated`; they are never guessed.
+
+Closer signals (regex over the closer's own lines; no LLM):
+- `SECOND_CHAIR_OFFERED`;
+- `NEXT_STEP_SCHEDULED` (date / time / owner);
+- the prohibited phrases.
+
+Display:
+- **Panel:** Avançado shows "PLAYBOOK COMPLIANCE" by stage (✓ satisfied, ○ pending, ✗ violated,
+  – not applicable, ? undecidable). A prohibited rule appears only when violated.
+- **Post-call Brief:** gains `## Playbook Compliance` with Satisfied (with evidence), Pending (with the
+  reason), Violations and Not decidable. There is no score (playbook §6 weights are not implemented).
+
+Limits:
+- **E3-R1 and E4-R1 are looser than the playbook.** The playbook also asks for a pillar and the
+  closer's confirmation.
+- **E10-R1 only checks that the closer spoke next**, not that the reply was on the same topic.
+- **After a restart, objections are not rebuilt** (a Commercial State limitation), so E10 covers this
+  runtime only.
+- **Decider presence is unknown.** If the decider is in the call, E6-R2 stays PENDING.
+
+Demo (real qwen3:8b, invented call): `python -m closer_ai.live.bench --compliance` prints the
+compliance after each line.
+
 ## Runtime configuration (measured)
 
 Default: qwen3:8b, arm **E1**, `num_ctx` **4096**, 1024 tokens kept for the output. Measured on
@@ -683,6 +747,7 @@ python -m closer_ai.live.bench --runs 5
 python -m closer_ai.live.bench --precision
 python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented
 python -m closer_ai.live.bench --latency --repeat 5 --out lat.jsonl   # per-stage latency matrix
+python -m closer_ai.live.bench --compliance   # Playbook Compliance growing line by line
 ```
 
 Options:

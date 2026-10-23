@@ -202,3 +202,25 @@ test("post-call brief appears in the advanced panel only after finalize", () => 
   const visible = JSON.stringify([v.status, v.rec, v.analyzing, v.detected, v.history, v.advanced.basic]);
   assert.ok(!visible.includes("Post-call")); // main UX untouched
 });
+
+test("playbook compliance is shown only in the advanced panel, by stage, with its evidence", () => {
+  const r = (rule_id, stage, title, status, segment_ids = [], cls = "REQUIRED") =>
+    ({ rule_id, stage, class: cls, title, status, segment_ids, reason: "" });
+  const playbook_compliance = {
+    stage_summary: [{ stage: "E3", title: "Dor" }, { stage: "E4", title: "Impacto" }, { stage: "E6", title: "Decisão" }],
+    rule_results: [
+      r("E3-R1", "E3", "Dor identificada", "SATISFIED", ["seg_2"]),
+      r("E4-R1", "E4", "Consequência explorada", "SATISFIED", ["seg_3"]),
+      r("E4-R2", "E4", "Impacto quantificado", "PENDING"),
+      r("E4-R5", "E4", "Afirmações absolutas", "PENDING", [], "PROHIBITED"),
+      r("E6-R2", "E6", "Plano para envolver o decisor", "PENDING", ["seg_1"]),
+    ],
+  };
+  const v = dockView({ ...ready, playbook_compliance }, ctx);
+  assert.deepStrictEqual(v.advanced.compliance, ["PLAYBOOK COMPLIANCE", "E3 · Dor", "✓ E3-R1 Dor identificada [seg_2]",
+    "E4 · Impacto", "✓ E4-R1 Consequência explorada [seg_3]", "○ E4-R2 Impacto quantificado",
+    "E6 · Decisão", "○ E6-R2 Plano para envolver o decisor [seg_1]"]); // prohibited only when violated
+  const visible = JSON.stringify([v.status, v.rec, v.analyzing, v.detected, v.history, v.advanced.basic]);
+  assert.ok(!visible.includes("E3-R1")); // main UX untouched
+  assert.strictEqual(dockView(ready, ctx).advanced.compliance, null); // older runtime: nothing shown
+});
