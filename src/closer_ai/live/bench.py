@@ -6,6 +6,7 @@
     python -m closer_ai.live.bench --sequences      # live sequences: is the NEW lead line the target?
     python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented, extraction latency
     python -m closer_ai.live.bench --authority      # stakeholder discovery answers vs authority blocking objections
+    python -m closer_ai.live.bench --latency --repeat 5 --label A --out runs/A.jsonl   # P1 latency matrix
 
 Each run is a fresh meeting: one closer line, then the case's lead line. The lead line goes through
 `Runtime.receive` (background worker, as from the extension), and a poller calls
@@ -22,6 +23,7 @@ import statistics
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from closer_ai.ai.ollama_provider import OllamaClassificationProvider
@@ -144,6 +146,117 @@ AUTHORITY_MATRIX = [
 ]
 
 
+# Latency matrix (P1): (scenario, kind, lines, expected category or None). Invented lines. Each run is a
+# fresh meeting through Runtime.receive (background worker) + the sidebar poller, so `displayed` is real.
+LATENCY = [
+    ("obvious price", "price", [("closer", CLOSER_LINE), ("lead", "Gostei da proposta, mas achei muito caro.")],
+     "PRICE_BUDGET"),
+    ("ambiguous price", "price", [("closer", "E o investimento, como ficou para vocês?"),
+                                  ("lead", "Esse valor ficou um pouco pesado pra gente.")], "PRICE_BUDGET"),
+    ("price reference", "context", [("closer", "E isso cabe no orçamento de vocês?"), ("lead", "Não, ficou acima.")],
+     "PRICE_BUDGET"),
+    ("negated price", "price", [("closer", "O que achou do valor?"), ("lead", "Não achei caro, o preço está ok.")],
+     None),
+    ("authority blocker 1", "authority", [("closer", "Faz sentido para vocês?"),
+                                          ("lead", "Preciso falar com meu sócio antes de fechar.")],
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("authority blocker 2", "authority", [("closer", "Faz sentido para vocês?"),
+                                          ("lead", "Eu gostei, mas não posso decidir isso sozinho.")],
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("authority blocker 3", "authority", [("closer", "Faz sentido para vocês?"),
+                                          ("lead", "Meu diretor precisa aprovar antes da gente seguir.")],
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("authority discovery 1", "discovery", [("closer", "Além de você, alguém participa da decisão?"),
+                                            ("lead", "Sim, meu sócio.")], None),
+    ("authority discovery 2", "discovery", [("closer", "Quem precisa olhar essa proposta?"),
+                                            ("lead", "Eu e meu diretor.")], None),
+    ("timing", "other", [("closer", "Quando faria sentido começar?"),
+                         ("lead", "Agora não é o momento, talvez no próximo trimestre.")], "TIMING_PRIORITY"),
+    ("need/value", "other", [("closer", "Faz sentido para vocês?"),
+                             ("lead", "Sinceramente não sei se a gente precisa disso.")], "NEED_VALUE_FIT"),
+    ("competition", "other", [("closer", "Como vocês fazem isso hoje?"),
+                              ("lead", "A gente já usa outra ferramenta que resolve isso.")],
+     "COMPETITION_EXISTING_SOLUTION"),
+    ("neutral", "neutral", [("closer", CLOSER_LINE), ("lead", "Hoje temos cinco pessoas no time.")], None),
+    ("same-turn continuation", "context", [("closer", "O que achou da proposta?"), ("lead", "Eu gostei."),
+                                           ("lead", "Mas está acima do que eu consigo investir agora.")],
+     "PRICE_BUDGET"),
+]
+HISTORY = [  # earlier, objection-free call lines (a full rolling window in a real call); invented
+    ("closer", "Bom dia! Obrigado por separar esse tempo hoje."), ("lead", "Bom dia, imagina, vamos lá."),
+    ("closer", "Me conta um pouco da empresa de vocês."),
+    ("lead", "A gente é uma distribuidora de insumos agrícolas, com uns quarenta clientes ativos."),
+    ("closer", "E como vocês acompanham os pedidos hoje?"),
+    ("lead", "Cada vendedor anota do seu jeito, depois alguém junta tudo numa planilha."),
+    ("closer", "Entendi. E isso funciona bem?"), ("lead", "Funciona, mas dá bastante retrabalho no fim do mês."),
+    ("closer", "Deixa eu te mostrar como a plataforma organiza isso."), ("lead", "Pode mostrar, por favor."),
+]
+LATENCY_FIELDS = ("queue_wait_ms", "classifier_latency_ms", "classifier_prompt_tokens", "classifier_output_tokens",
+                  "classifier_ollama_load_ms", "classifier_ollama_prompt_eval_ms", "classifier_ollama_eval_ms",
+                  "policy_ms", "guidance_latency_ms", "guidance_prompt_tokens", "guidance_output_tokens",
+                  "guidance_ollama_load_ms", "guidance_ollama_prompt_eval_ms", "guidance_ollama_eval_ms",
+                  "end_to_end_latency_ms", "displayed_latency_ms")
+
+
+def run_scenario(runtime: Runtime, meeting_id: str, lines: list, poll: float = 0.25, timeout: float = 180.0,
+                 history: list | None = None) -> dict:
+    """All lines as a live stream (background worker); wait for the last lead line's outcome as the sidebar
+    sees it (displayed when a recommendation shows up). `history`: earlier call lines, already seen (context
+    only, via rehydrate), as in a real call where each of them was analyzed when it was said."""
+    s = runtime.session(meeting_id)
+    history = history or []
+    if history:
+        base = time.time() - 60
+        runtime.rehydrate(meeting_id, [{"speaker": "Closer Teste" if role == "closer" else "Lead Teste", "text": text,
+                                        "timestamp": base + i, "sequence": i} for i, (role, text) in enumerate(history, 1)])
+    last_lead = len(history) + max(i for i, (role, _) in enumerate(lines, 1) if role == "lead")
+    for seq, (role, text) in enumerate(lines, len(history) + 1):
+        now = time.time()
+        runtime.receive(parse_utterance({"meeting_id": meeting_id, "speaker": "Closer Teste" if role == "closer"
+                                         else "Lead Teste", "text": text, "timestamp": now, "sequence": seq},
+                                        runtime.closer_names, now))
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        view = runtime.recommendation(meeting_id)  # marks displayed, like the sidebar poll
+        done = [t for t in s.timings if t.get("sequence") == last_lead]
+        if done and (view["state"] == "ACTIVE" or done[-1]["outcome"] != "RECOMMENDED"):
+            break
+        if not s.timings and not s.should_analyze() and s.active_analysis is None and s.last_trigger_reason:
+            return {"outcome": "NOT_ANALYZED", "reason": s.last_trigger_reason, "shown": None}
+        time.sleep(poll)
+    else:
+        raise TimeoutError(f"{meeting_id}: no result in {timeout}s")
+    t = flat(done[-1])
+    rec = s.current()
+    t["shown"] = rec.category if rec else None
+    return t
+
+
+def pct(values: list[float], q: float) -> float:
+    v = sorted(values)
+    return v[min(len(v) - 1, round(q * (len(v) - 1)))]
+
+
+def stats(values: list[float]) -> dict:
+    if not values:
+        return {}
+    out = {"median": round(statistics.median(values)), "min": min(values), "max": max(values), "n": len(values)}
+    if len(values) >= 5:
+        out["p90"] = pct(values, 0.9)
+    return out
+
+
+def unload_models(base_url: str = "http://127.0.0.1:11434") -> None:
+    """Cold start: ask Ollama to unload every loaded model (keep_alive 0)."""
+    import urllib.request
+    with urllib.request.urlopen(f"{base_url}/api/ps", timeout=10) as r:
+        loaded = [m["name"] for m in json.loads(r.read()).get("models", [])]
+    for name in loaded:
+        body = json.dumps({"model": name, "keep_alive": 0}).encode()
+        urllib.request.urlopen(urllib.request.Request(f"{base_url}/api/generate", data=body,
+                                                      headers={"Content-Type": "application/json"}), timeout=60).read()
+
+
 def score_commercial(state: dict, expected: dict) -> dict:
     """Missing expected facts (FN) and facts nobody expected (FP), per field."""
     fn, fp = [], []
@@ -222,7 +335,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--commercial", action="store_true", help="run the COMMERCIAL cases (Commercial State v0)")
     p.add_argument("--no-commercial", action="store_true", help="disable commercial facts extraction (A/B)")
     p.add_argument("--authority", action="store_true", help="run the AUTHORITY_MATRIX (discovery vs blocking)")
+    p.add_argument("--latency", action="store_true", help="run the LATENCY matrix (per-stage timings + accuracy)")
+    p.add_argument("--cold", action="store_true", help="--latency: unload models first; the first run is cold")
+    p.add_argument("--label", default="", help="--latency: config label in the output")
+    p.add_argument("--out", type=Path, help="--latency: also append every row to this JSONL file")
+    p.add_argument("--scenarios", default="", help="--latency: comma-separated scenario names (default: all)")
     p.add_argument("--repeat", type=int, default=1, help="--authority: runs per case")
+    p.add_argument("--no-fast-path", action="store_true", help="always use the LLM classifier")
+    p.add_argument("--history", type=int, default=0,
+                   help="--latency: prefix each scenario with this many earlier (neutral) call lines")
     p.add_argument("--model", default="qwen3:8b")
     p.add_argument("--num-ctx", type=int, default=4096)
     p.add_argument("--reserve-tokens", type=int, default=1024)
@@ -230,12 +351,55 @@ def main(argv: list[str] | None = None) -> int:
 
     ollama = OllamaClassificationProvider(a.model, timeout=120.0, num_ctx=a.num_ctx)
     provider = ContextGuard(ollama, num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
-    runtime = Runtime(provider, LiveConfig(commercial_facts=not a.no_commercial), {"Closer Teste"}, log=lambda _s: None)
+    runtime = Runtime(provider, LiveConfig(commercial_facts=not a.no_commercial, fast_path=not a.no_fast_path),
+                      {"Closer Teste"}, log=lambda _s: None)
 
+    if a.latency and a.cold:
+        unload_models()
     t0 = time.time()
-    ollama.classify('Return {"ok": true} as JSON.')  # warm-up: load the model; reported, not measured
+    if not (a.latency and a.cold):
+        ollama.classify('Return {"ok": true} as JSON.')  # warm-up: load the model; reported, not measured
     print(json.dumps({"warmup_ms": round((time.time() - t0) * 1000),
                       "load_ms": round(ollama.last_usage.get("load_duration", 0) / 1e6)}), flush=True)
+
+    if a.latency:
+        rows = []
+        chosen = [x for x in LATENCY if not a.scenarios or x[0] in a.scenarios.split(",")]
+        for r in range(a.repeat):
+            for i, (name, kind, lines, expected) in enumerate(chosen):
+                # a different number per run: a real call's window never repeats, so Ollama's prompt cache
+                # must not make a repeated run look faster than live
+                history = [(role, text.replace("quarenta", str(31 + r * len(chosen) + i)))
+                           for role, text in HISTORY[:a.history]]
+                t = run_scenario(runtime, f"lat-{a.label}-{i}-{r}-{time.time():.0f}", lines, history=history)
+                row = {"label": a.label, "scenario": name, "kind": kind, "run": r + 1,
+                       "cold": a.cold and r == 0 and i == 0, "expected": expected, "shown": t.get("shown"),
+                       "classifier_category": t.get("category"), "outcome": t.get("outcome"), "reason": t.get("reason"),
+                       "classification_source": t.get("classification_source", "llm"),
+                       "ok": t.get("shown") == expected, **{k: t.get(k) for k in LATENCY_FIELDS}}
+                print(json.dumps(row, ensure_ascii=False), flush=True)
+                rows.append(row)
+                if a.out:
+                    with a.out.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        warm = [r for r in rows if not r["cold"]]
+        pick = lambda key, rs: [r[key] for r in rs if isinstance(r.get(key), int | float)]
+        summary = {"label": a.label, "runs": len(rows), "warm_runs": len(warm),
+                   "accuracy": f"{sum(r['ok'] for r in rows)}/{len(rows)}",
+                   "false_positives": sum(r["shown"] is not None and r["shown"] != r["expected"] for r in rows),
+                   "false_negatives": sum(r["shown"] is None and r["expected"] is not None for r in rows),
+                   "discovery_fp": sum(r["shown"] is not None for r in rows if r["kind"] == "discovery"),
+                   "authority_blockers": f"{sum(r['ok'] for r in rows if r['kind'] == 'authority')}/"
+                                         f"{sum(r['kind'] == 'authority' for r in rows)}",
+                   "fast_path_hits": sum(r["classification_source"] == "deterministic_fast_path" for r in rows),
+                   **{k: stats(pick(k, warm)) for k in LATENCY_FIELDS},
+                   "cold": [{k: r.get(k) for k in ("scenario", "classifier_ollama_load_ms", "classifier_latency_ms",
+                                                   "displayed_latency_ms")} for r in rows if r["cold"]]}
+        print(json.dumps({"latency_summary": summary}, ensure_ascii=False, indent=1), flush=True)
+        if a.out:
+            with a.out.with_suffix(".summary.json").open("w", encoding="utf-8") as f:
+                json.dump(summary, f, ensure_ascii=False, indent=1)
+        return 0
 
     if a.authority:
         rows = []

@@ -261,6 +261,7 @@ class Runtime:
                                                               "displayed_latency_ms") if k in last},
                              "counters": dict(s.counters), "analysis_error_reasons": dict(s.error_reasons),
                              "commercial_counters": dict(s.fact_counters),
+                             "fast_path": {**s.fast_path_counters, "by_category": dict(s.fast_path_by_category)},
                              "model_state": self.model_state,
                              "recommendation_state": (s.current_recommendation.state
                                                       if s.current_recommendation else "NONE")}
@@ -409,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--model", default="qwen3:8b")
     p.add_argument("--num-ctx", type=int, default=4096)
+    p.add_argument("--no-fast-path", action="store_true",
+                   help="always use the LLM classifier (no deterministic fast path for obvious PRICE/AUTHORITY)")
     p.add_argument("--reserve-tokens", type=int, default=1024, help="output budget kept free in num_ctx")
     p.add_argument("--arm", default="E1", choices=("E0", "E1", "E2"))
     p.add_argument("--window-seconds", type=float, default=LiveConfig.window_seconds)
@@ -430,7 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     provider = ContextGuard(ollama, num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
     config = LiveConfig(window_seconds=a.window_seconds, max_window_utterances=a.window_utterances,
                         cooldown_seconds=a.cooldown, ttl_seconds=a.ttl, arm=a.arm,
-                        commercial_facts=not a.no_commercial_state)
+                        commercial_facts=not a.no_commercial_state, fast_path=not a.no_fast_path)
     names = {n.strip() for n in a.closer.split(",") if n.strip()}
     runtime = Runtime(provider, config, names, log=lambda s: print(s, file=sys.stderr, flush=True), debug=a.debug)
     if a.replay:
@@ -438,7 +441,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     server = bind_or_explain(a.port, make_handler(runtime))
     threading.Thread(target=warm_up, args=(ollama, runtime.log, runtime), daemon=True).start()
-    print(f"AI Closer live runtime on http://127.0.0.1:{a.port} ({a.model}, {a.arm}, num_ctx {a.num_ctx})"
+    print(f"AI Closer live runtime on http://127.0.0.1:{a.port} ({a.model}, {a.arm}, num_ctx {a.num_ctx}"
+          f"{'; no fast path' if a.no_fast_path else ''})"
           f" closer names: {sorted(runtime.closer_names)}{' [DEBUG]' if a.debug else ''}", file=sys.stderr, flush=True)
     try:
         server.serve_forever()

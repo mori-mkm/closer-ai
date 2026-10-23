@@ -409,7 +409,7 @@ def test_explicit_price_words_win_over_need_value_fit(kb):
     assert price_override("NEED_VALUE_FIT", "Não preciso disso, e ainda é caro.") == "NEED_VALUE_FIT"  # mixed
     assert price_override("TRUST_RISK", "É caro e tenho medo de não funcionar.") == "TRUST_RISK"  # only NVF
 
-    s, _, clock = _session(kb)
+    s, _, clock = _session(kb, fast_path=False)  # the LLM label path (the fast path would take this line)
     _say(s, clock, 1, "lead", "Gostei, mas achei caro demais.")
     t = s.analyze()
     assert (t["category_before"], t["category"], t["outcome"]) == ("NEED_VALUE_FIT", "PRICE_BUDGET", "RECOMMENDED")
@@ -444,7 +444,7 @@ def test_explicit_third_party_decision_wins_over_timing(kb):
     assert norm("NEED_VALUE_FIT", "Preciso falar com meu sócio antes.") == "NEED_VALUE_FIT"  # only TIMING is touched
 
     # through the session: normalized before retrieval, so the AUTHORITY knowledge unit is used
-    s, provider, clock = _session(kb)
+    s, provider, clock = _session(kb, fast_path=False)  # the LLM label path
     _say(s, clock, 1, "lead", "Preciso falar com o meu sócio antes")
     t = s.analyze()
     assert (t["category_before"], t["category"], t["outcome"]) == ("TIMING_PRIORITY", "AUTHORITY_INTERNAL_BUY_IN",
@@ -490,7 +490,7 @@ def test_active_analysis_is_never_confused_with_the_last_completed_one(kb):
                 guidance_gate.wait(5)  # hold the guidance open: objection known, suggestion not ready
             return super().classify(prompt)
 
-    rt = Runtime(Slow(), LiveConfig(), {"Matheus"}, log=lambda s: None)
+    rt = Runtime(Slow(), LiveConfig(fast_path=False), {"Matheus"}, log=lambda s: None)  # LLM path timing
     rt.knowledge = kb
     for seq, (sp, tx) in enumerate([("Você", "Como vocês fazem esse processo hoje?"),
                                     ("Lead Teste", "A gente perde bastante tempo com isso."),
@@ -692,7 +692,7 @@ def _live(s, clock, lines):
 
 
 def test_the_prompt_targets_only_the_new_lead_line(kb):
-    s, provider, clock = _session(kb)
+    s, provider, clock = _session(kb, fast_path=False)  # both lines would take the fast path
     _live(s, clock, [("lead", "Gostei da proposta, mas achei muito caro."), ("closer", "Entendi."),
                      ("lead", "Preciso falar com meu sócio antes de fechar.")])
     first, second = [p for p in provider.prompts if not p.startswith("GUIDANCE TASK")]
