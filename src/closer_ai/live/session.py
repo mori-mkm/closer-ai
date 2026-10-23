@@ -41,6 +41,14 @@ from closer_ai.ai.objection_classifier import (
 from closer_ai.ai.objection_guidance import ObjectionKnowledge, _generic, guide_episode
 from closer_ai.ai.ollama_provider import OllamaError
 from closer_ai.demo.analyze_call import InputTooLargeError
+from closer_ai.live.commercial_state import (
+    FACTS_SCHEMA,
+    CommercialEvent,
+    CommercialState,
+    build_facts_prompt,
+    objection_event,
+    parse_facts,
+)
 from closer_ai.normalization.models import Call, Participant, TranscriptSegment
 
 LABELS = {  # short pt-BR label for the panel; the category itself is always shown too
@@ -169,6 +177,15 @@ class LiveConfig:
     cooldown_seconds: float = 25.0
     ttl_seconds: float = 90.0
     arm: Arm = "E1"
+    # Commercial facts extraction (Commercial State): on/off, context lines before the first new lead
+    # line, and lines per call.
+    commercial_facts: bool = True
+    # Background worker: extract only after this much silence (no new utterance), so the extra call does
+    # not hold Ollama while the conversation is flowing (the next lead line would wait behind it) and
+    # several lines go in one call.
+    facts_idle_seconds: float = 4.0
+    facts_context_utterances: int = 6
+    facts_chunk_utterances: int = 8
 
 
 @dataclass
@@ -289,6 +306,14 @@ class LiveSalesSession:
     # Temporary debug for the first real-Meet tests (`--debug`): stage log + last-event summary for the panel.
     debug: Callable[..., None] | None = None
     debug_state: dict[str, Any] = field(default_factory=dict)
+    # Commercial State (see commercial_state.py): facts, extraction high-water mark, technical counters.
+    commercial: CommercialState = field(default_factory=CommercialState)
+    _last_extracted_seq: int = -1
+    _rehydrated_upto: int = -1  # extractions of lines up to here rebuild the state after a restart
+    _analysis_done_at: float = 0.0  # the last objection analysis finished (the closer usually answers now)
+    fact_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
+        "extractions", "rebuild_extractions", "extraction_errors", "events_accepted", "events_rejected",
+        "facts_added", "facts_updated"), 0))
 
     def _dbg(self, tag: str, **fields: Any) -> None:
         if self.debug:
@@ -343,8 +368,10 @@ class LiveSalesSession:
                 self._short_ids[utt.sequence] = f"seg_{len(self._short_ids) + 1}"
                 added.append(utt)
             if added:
-                # already seen by the previous runtime: never analyzed again as new lines
+                # already seen by the previous runtime: never analyzed again as new lines (the commercial
+                # state is rebuilt from them by extraction only: see extract())
                 self._last_analyzed_seq = max(self._last_analyzed_seq, max(u.sequence for u in added))
+                self._rehydrated_upto = max(self._rehydrated_upto, self._last_analyzed_seq)
                 if self.pending_lead_seq is not None and self.pending_lead_seq <= self._last_analyzed_seq:
                     self.pending_lead_seq = None
                 leads = [u for u in added if u.role == "lead"]
@@ -509,6 +536,7 @@ class LiveSalesSession:
                 "sequence": t["sequence"], "segment_id": self._sid(t["sequence"]) if t["sequence"] is not None else None,
                 "category": t.get("category"), "outcome": outcome, "reason": reason, "finished_at": self.clock()}
             self.active_analysis = None
+            self._analysis_done_at = self.clock()
             self.timings.append(t)
             if t["sequence"] is not None:
                 self.counters["analyses_completed"] += 1
@@ -576,6 +604,8 @@ class LiveSalesSession:
                 t["category"] = episode.category
                 return "NO_RECOMMENDATION", "UNCORROBORATED_CATEGORY"
         t["category"] = episode.category
+        # The engine's own decision feeds the Commercial State (never re-classified there).
+        self._record([objection_event(episode.category, episode.objection_segment_ids)], call)
         current = self.current()
         if (current and current.category == episode.category
                 and self.clock() - current.shown_at < self.config.cooldown_seconds):
@@ -633,3 +663,78 @@ class LiveSalesSession:
         ids = set(e.objection_segment_ids)
         return (e.category_status == "PRESENT" and e.category in LABELS
                 and bool(ids & new_ids) and ids <= allowed)
+
+    # --- commercial state -------------------------------------------------------------------------
+
+    def _record(self, events: list[CommercialEvent], call: Call) -> None:
+        order = {seg.segment_id: seg.segment_index for seg in call.segments}
+        with self.lock:
+            for e in events:
+                result = self.commercial.apply(e, order)
+                if result == "ADDED":
+                    self.fact_counters["facts_added"] += 1
+                elif result == "UPDATED":
+                    self.fact_counters["facts_updated"] += 1
+                self._dbg("COMMERCIAL", event=e.event_type, value=e.value, segments=list(e.segment_ids),
+                          role=e.stakeholder_role, result=result)
+
+    def _facts_todo(self) -> list[LiveUtterance]:
+        return [u for u in self.utterances if u.role == "lead" and u.sequence > self._last_extracted_seq]
+
+    def should_extract(self) -> bool:
+        """Lead lines not yet read for commercial facts (live, or rehydrated after a restart)."""
+        with self.lock:
+            return self.config.commercial_facts and bool(self._facts_todo())
+
+    def facts_idle(self) -> bool:
+        """No live utterance and no finished analysis for `facts_idle_seconds` (the background worker
+        extracts only then: right after a recommendation the closer answers and the lead may reply).
+        Lines rehydrated after a restart are old: their rebuild never waits."""
+        with self.lock:
+            last = max((u.received_at for u in self.utterances if u.sequence > self._rehydrated_upto),
+                       default=0.0)
+            last = max(last, self._analysis_done_at)
+            return self.clock() - last >= self.config.facts_idle_seconds
+
+    def extract(self) -> dict[str, Any]:
+        """One commercial-facts extraction over the oldest unread lead lines (+ a few lines of context).
+
+        Never touches the recommendation or the objection analysis counters. One LLM call, skipped when
+        the new lead lines are single words ("Ok.", "Sim."). Errors are recorded; the lines are not retried."""
+        with self.lock:
+            todo = self._facts_todo()
+            if not todo:
+                return {"kind": "commercial_facts", "outcome": "NOTHING"}
+            first = self.utterances.index(todo[0])
+            chunk = self.utterances[max(first - self.config.facts_context_utterances, 0):
+                                    first + self.config.facts_chunk_utterances]
+            new = [u for u in chunk if u in todo]
+            self._last_extracted_seq = new[-1].sequence
+            rebuild = new[-1].sequence <= self._rehydrated_upto
+            call = self._window_call(chunk)
+        targets = tuple(self._sid(u.sequence) for u in new if len(u.text.split()) >= 2)
+        t: dict[str, Any] = {"kind": "commercial_facts", "rebuild": rebuild, "target_segment_ids": list(targets)}
+        if not targets:
+            return {**t, "outcome": "SKIPPED_SHORT"}
+        started = self.clock()
+        try:
+            response = self.provider.classify(build_facts_prompt(call, targets), schema=FACTS_SCHEMA)
+            with self.lock:
+                events, rejected = parse_facts(call, targets, response, self.commercial)
+            self._record(events, call)
+            t.update(outcome="EXTRACTED", accepted=len(events), rejected=[r["reason"] for r in rejected])
+        except (OllamaError, MalformedResponseError, InputTooLargeError, TypeError, ValueError) as exc:
+            events, rejected = [], []
+            t.update(outcome="ERROR", error_type=error_type(exc), error_detail=str(exc)[:200])
+        except Exception as exc:  # noqa: BLE001 - never kill the worker: objection analysis shares it
+            events, rejected = [], []
+            t.update(outcome="ERROR", error_type="OTHER", error_detail=f"{type(exc).__name__}: {exc}"[:200])
+        t["latency_ms"] = _ms(self.clock() - started)
+        t.update(usage=_usage(self.provider))
+        with self.lock:
+            self.fact_counters["rebuild_extractions" if rebuild else "extractions"] += 1
+            self.fact_counters["extraction_errors"] += t["outcome"] == "ERROR"
+            self.fact_counters["events_accepted"] += len(events)
+            self.fact_counters["events_rejected"] += len(rejected)
+        self._dbg("COMMERCIAL", **{k: v for k, v in t.items() if k != "usage"})
+        return t

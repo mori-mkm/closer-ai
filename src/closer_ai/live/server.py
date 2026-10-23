@@ -121,12 +121,20 @@ class Runtime:
         busy = utt.meeting_id in self._busy
         self.dbg("TRIGGER", analyze=why_not is None, reason=why_not, busy=busy,
                  queued=why_not is None and busy, pending_lead=s.pending_lead_seq)
-        if accepted and why_not is None:
+        if accepted and (why_not is None or s.should_extract()):
             if background:
                 self._kick(s)
             else:
-                self._done(s.analyze())
+                if why_not is None:
+                    self._done(s.analyze())
+                while s.should_extract():
+                    self._facts(s.extract())
         return status
+
+    def _facts(self, t: dict[str, Any]) -> None:
+        """One commercial-facts extraction finished: technical line only (no call text)."""
+        if t.get("outcome") != "NOTHING":
+            self.log(json.dumps(t))
 
     def _done(self, t: dict[str, Any]) -> None:
         """One finished analysis: timing line on stderr + model health from what actually happened."""
@@ -150,6 +158,8 @@ class Runtime:
         s = self.session(meeting_id)
         added = s.rehydrate(utts)
         self.dbg("REHYDRATE", meeting_id=meeting_id, received=len(utts), added=added, utterances=len(s.utterances))
+        if added and s.should_extract():
+            self._kick(s)  # rebuild the commercial state in the background: extraction only, no analysis
         return {"rehydrated": added, "utterances": len(s.utterances), "instance": self.instance}
 
     def _kick(self, s: LiveSalesSession) -> None:
@@ -159,11 +169,20 @@ class Runtime:
             self._busy.add(s.meeting_id)
 
         def work() -> None:
+            # Objection analysis first (it drives the recommendation); commercial facts only when no lead
+            # line is waiting for analysis and the call has paused (facts_idle), so they rarely hold Ollama
+            # when the next lead line arrives.
             try:
                 while True:
-                    self._done(s.analyze())
+                    if s.should_analyze():
+                        self._done(s.analyze())
+                    elif s.should_extract():
+                        if s.facts_idle():
+                            self._facts(s.extract())
+                        else:
+                            time.sleep(0.25)  # wait for a pause in the conversation (or a new lead line)
                     with self._lock:
-                        if not s.should_analyze():
+                        if not s.should_analyze() and not s.should_extract():
                             self._busy.discard(s.meeting_id)
                             return
             except BaseException:
@@ -210,6 +229,7 @@ class Runtime:
             view["last_completed_analysis"] = s.last_completed_analysis and dict(s.last_completed_analysis)
             view["transcript"] = [{"role": u.role, "text": u.text, **({"speaker": u.speaker} if self.debug else {})}
                                   for u in s.transcript()]
+            view["commercial_state"] = s.commercial.view()  # shown only in the dock's advanced panel
         if self.debug:
             if self._last_poll.get(meeting_id) != view["state"]:  # log changes only (polled every 0.5 s)
                 self._last_poll[meeting_id] = view["state"]
@@ -220,6 +240,7 @@ class Runtime:
                                                               "guidance_latency_ms", "end_to_end_latency_ms",
                                                               "displayed_latency_ms") if k in last},
                              "counters": dict(s.counters), "analysis_error_reasons": dict(s.error_reasons),
+                             "commercial_counters": dict(s.fact_counters),
                              "model_state": self.model_state,
                              "recommendation_state": (s.current_recommendation.state
                                                       if s.current_recommendation else "NONE")}
@@ -373,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="how long Ollama keeps the model loaded between analyses ('' = Ollama's default, 5 min)")
     p.add_argument("--replay", type=Path, help="stream this transcript instead of serving")
     p.add_argument("--delay", type=float, default=1.0, help="seconds between replayed utterances")
+    p.add_argument("--no-commercial-state", action="store_true",
+                   help="do not extract commercial facts (no extra LLM call per lead line)")
     p.add_argument("--debug", action="store_true",
                    help="temporary: log every pipeline stage (with caption text) and show a debug panel; test meetings only")
     a = p.parse_args(argv)
@@ -380,7 +403,8 @@ def main(argv: list[str] | None = None) -> int:
     ollama = OllamaClassificationProvider(a.model, timeout=a.timeout, num_ctx=a.num_ctx, keep_alive=a.keep_alive or None)
     provider = ContextGuard(ollama, num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
     config = LiveConfig(window_seconds=a.window_seconds, max_window_utterances=a.window_utterances,
-                        cooldown_seconds=a.cooldown, ttl_seconds=a.ttl, arm=a.arm)
+                        cooldown_seconds=a.cooldown, ttl_seconds=a.ttl, arm=a.arm,
+                        commercial_facts=not a.no_commercial_state)
     names = {n.strip() for n in a.closer.split(",") if n.strip()}
     runtime = Runtime(provider, config, names, log=lambda s: print(s, file=sys.stderr, flush=True), debug=a.debug)
     if a.replay:

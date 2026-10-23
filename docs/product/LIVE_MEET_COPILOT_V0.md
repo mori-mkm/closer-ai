@@ -415,6 +415,95 @@ classification, runtime killed for ~3.3 s and restarted): 30 utterances, 58 atte
 (`RUNTIME_UNAVAILABLE`), **30/30 confirmed, 0 lost, 0 duplicates**. A restarted runtime starts with an
 empty session (no persistence by design).
 
+## Commercial State v0 (`feat/commercial-state-v0`, 2026-10-23)
+
+The copilot keeps more than objections: an evidence-backed state of the ongoing conversation.
+
+```
+Transcript → CommercialEvent (typed, cites segment ids) → CommercialState (deduplicated, incremental)
+```
+
+Code: `src/closer_ai/live/commercial_state.py`. This is not `closer_ai.domain.commercial_state`, which
+is the post-call Call → current match → Deal → Outcome composition.
+
+**Events (v0, 8 types):** PAIN_IDENTIFIED, IMPACT_IDENTIFIED, STAKEHOLDER_IDENTIFIED,
+DECISION_PROCESS_IDENTIFIED, BUYING_SIGNAL_DETECTED, OBJECTION_IDENTIFIED, COMMERCIAL_TERM_MENTIONED,
+NEXT_STEP_IDENTIFIED. Each event carries `event_type`, `value` (the lead's own words), `segment_ids`
+(canonical evidence), `source_role` (lead), `status` and, for stakeholders only, a `stakeholder_role`.
+- `status` is OBSERVED when the fact came from a grounded extraction, CONFIRMED when it came from the
+  objection engine.
+- `stakeholder_role` is one of mentioned < decision_participant < final_decision_maker.
+
+**State:** the fields `pain_points`, `impacts`, `stakeholders`, `decision_process`, `buying_signals`,
+`objections`, `commercial_terms` and `next_steps`. Each field holds one fact per dedup key, with
+`value`, `segment_ids` (all evidence ever seen for it, in call order, never removed), `status` and
+`role` (stakeholders only). There is also an audit log of the accepted events and what each one did
+(ADDED / UPDATED / UNCHANGED).
+
+**Sources, with no duplicated intelligence:**
+- OBJECTION_IDENTIFIED comes only from the live objection engine's decision. It is recorded once a
+  category passes the policy (anchoring, single category, normalizations, corroboration), with the
+  episode's objection segments. It is never classified again.
+- Every other fact comes from **one small structured LLM call per pause in the conversation**: the same
+  provider and model, with a closed enum schema (~3 s median). The call
+  reads the lead lines not read yet, plus up to 6 earlier lines as context.
+  - It never runs while a lead line waits for objection analysis, and it waits for 4 s with no new
+    utterance and no just-finished analysis (`facts_idle_seconds`). That way it does not hold Ollama
+    while the conversation flows, and lines spoken close together share one call.
+  - Single-word lead lines ("Ok.", "Sim.") cost no call.
+  - `--no-commercial-state` turns it off.
+
+**Grounding (deterministic, fail-closed; `parse_facts`):** a fact is kept only if all of these hold.
+1. It is a known non-objection type. The model cannot emit OBJECTION_IDENTIFIED.
+2. Its `segment_ids` exist in the call.
+3. Its value is an exact span of the cited segments' text, folded for accents, case and punctuation
+   and matched on whole words. Any target line that contains the value is added as evidence.
+4. The span is in the new lead turn or in the turn right before it (the question being answered).
+   This way an old fact cannot be re-extracted as new from context.
+   - The only exception is a stronger role for a stakeholder already in the state, when the role cue
+     is in the new line ("Ele é quem dá a palavra final.").
+5. Type-specific rules:
+   - a COMMERCIAL_TERM must name an amount, plan, payment, contract or discount, so "achei caro"
+     stays the objection engine's;
+   - a DECISION_PROCESS must say how the decision is made, so "agora não é o momento" is not one;
+   - a stakeholder role above "mentioned" needs a decision cue in that scope, otherwise it is
+     downgraded (so "sócio" never becomes "CFO" or "final decision maker" unless it was said).
+
+**Dedup v0:** the key is the folded value without determiners or fillers, so "sócio", "meu sócio" and
+"Meu sócio também" are one fact. A repeat adds evidence; a stronger stakeholder role updates the role.
+Paraphrases ("tudo manual" vs "fazemos tudo manualmente") stay separate items.
+
+**No UX change:** the state is in the GET `/recommendation` answer (`commercial_state`) and is shown
+only in the dock's ••• → Avançado panel (COMMERCIAL STATE, each fact with its `[seg_n]`). The
+technical counters appear with `--debug`. The state never produces a suggestion.
+
+**Recovery:** after a restart, `/rehydrate` restores the transcript as before. The background worker
+then rebuilds the non-objection facts by extraction only, in chunks over the rehydrated lines:
+- no analysis and no recommendation;
+- counted as `rebuild_extractions`, not live work;
+- idempotent: a resent rehydrate adds nothing and extracts nothing again.
+
+Objections from before the restart are not rebuilt, because that would mean classifying them again;
+the state's `objections` restarts empty.
+
+**Measured** (real qwen3:8b, `python -m closer_ai.live.bench --commercial`, 11 invented cases, 17 lead
+lines):
+
+| Run | Cases exact | Facts missed | Facts invented/unexpected |
+|---|---|---|---|
+| first prompt | 6/11 | 4 | 3 |
+| final (3 runs) | **10/11** each | 1 | **0** |
+
+- The miss is always DECISION_PROCESS "validar com meu sócio": the stakeholder is recorded, the step
+  is not.
+- The gates rejected, among others, "achei (muito) caro" as COMMERCIAL_TERM and one ungrounded value
+  on the neutral line.
+- Objection behavior is unchanged: anchoring sequences 12/12, precision probe 7/8 with 0 false
+  recommendations.
+- Recommendation latency, one meeting at a realistic pace (on vs off, 2 runs each), was comparable.
+  When a lead line arrives while an extraction is already running, it waits for it (up to ~4.5 s seen
+  once).
+
 ## Runtime configuration (measured)
 
 Default: qwen3:8b, arm **E1**, `num_ctx` **4096**, 1024 tokens kept for the output. Measured on
@@ -457,11 +546,14 @@ python -m closer_ai.live.server --closer "Matheus"
 # 3. latency / precision benchmark (synthetic lines, real Ollama)
 python -m closer_ai.live.bench --runs 5
 python -m closer_ai.live.bench --precision
+python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented
 ```
 
 Options:
 - `--window-seconds`, `--window-utterances`, `--cooldown`, `--ttl`: the live policy above;
 - `--arm`, `--num-ctx`, `--reserve-tokens`: the model configuration;
+- `--no-commercial-state`: no commercial facts extraction (no extra LLM call); objection analysis is
+  unchanged;
 - `--keep-alive` (default `30m`): how long Ollama keeps the model loaded; the runtime also loads it at
   start;
 - `--debug` (temporary, test meetings only): logs every stage to stderr (`[CAPTION] [HTTP] [RUNTIME]
@@ -529,6 +621,11 @@ Options:
   `session.py`).
 - One analysis runs at a time (an Ollama call is never cancelled); latest-wins keeps at most one lead
   line waiting.
+- **Commercial State v0:** facts are the lead's literal words, with small closed type rules (the
+  COMMERCIAL_TERM and DECISION_PROCESS cue lists are `ponytail:` word lists). Measured only on 11
+  synthetic cases. Dedup is exact-key, so paraphrases are separate items. Closer-stated facts are
+  not extracted (the lead's agreement is). Objections are not rebuilt after a restart. An
+  extraction already running can delay the next objection analysis by its duration (~3 s).
 - No persistence, no audio, no STT, no bot. Captions are the only input.
 - **Not built yet:** Playbook Compliance, Opportunity Detection, Manager Intelligence.
 

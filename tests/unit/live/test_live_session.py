@@ -17,6 +17,7 @@ from closer_ai.live.session import LiveConfig, LiveSalesSession, LiveUtterance
 _SEG = re.compile(r"\[(seg_\d+) \| (\w+)\]\n(.*)")
 SCRIPT = {  # lead text -> category the fake classifier reports
     "Gostei da proposta, mas achei muito caro.": "PRICE_BUDGET",
+    "Gostei, mas achei muito caro.": "PRICE_BUDGET",
     "Continua caro demais pra gente.": "PRICE_BUDGET",
     "Preciso falar com meu sócio antes de fechar.": "AUTHORITY_INTERNAL_BUY_IN",
     "A gente perde bastante tempo com isso.": "IMPLEMENTATION_INTEGRATION",  # qwen3 over-detection
@@ -58,6 +59,8 @@ class FakeProvider:
     def classify(self, prompt: str, **_):
         self.prompts.append(prompt)
         segs = _SEG.findall(prompt)
+        if prompt.startswith("COMMERCIAL FACTS TASK"):  # commercial facts: see test_commercial_state.py
+            return {"events": []}
         if prompt.startswith("GUIDANCE TASK"):
             category = re.search(r"Objection category \(classifier\): (\w+)", prompt).group(1)
             move, rationale, question = ANSWERS[category]
@@ -371,7 +374,8 @@ def test_busy_runtime_analyzes_only_the_latest_lead_next(kb):
                 gate.wait(5)  # the first (noise) analysis is still running
             return super().classify(prompt)
 
-    rt = Runtime(Slow(), LiveConfig(), {"Matheus"}, log=lambda s: None)
+    # objection queue only: the commercial-facts worker would keep it busy until the call pauses
+    rt = Runtime(Slow(), LiveConfig(commercial_facts=False), {"Matheus"}, log=lambda s: None)
     rt.knowledge = kb
     say = lambda seq, sp, tx: rt.receive(parse_utterance(
         {"meeting_id": "m", "speaker": sp, "text": tx, "sequence": seq}, rt.closer_names, 1.0))
@@ -596,7 +600,9 @@ def test_restart_rehydration_restores_context_without_reanalysis(kb):
     view = new.recommendation("m")
     assert [u["text"] for u in view["transcript"]] == [tx for _, _, tx in MEETING]  # 4. history kept, in order
     assert [u["role"] for u in view["transcript"]] == ["closer", "lead", "lead"]
-    assert provider.prompts == [] and not s.should_analyze() and view["status"] == "CAPTURING"  # 5. no analysis
+    # 5. no analysis (only the background commercial-state rebuild may read the lines)
+    assert not [p for p in provider.prompts if not p.startswith("COMMERCIAL FACTS TASK")]
+    assert not s.should_analyze() and view["status"] == "CAPTURING"
     assert (view["state"], view["last_completed_analysis"]) == ("NONE", None)  # nothing invented
     assert (s.counters["received"], s.counters["accepted"], s.counters["rehydrated"]) == (0, 0, 3)  # not live delivery
 

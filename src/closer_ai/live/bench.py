@@ -4,6 +4,7 @@
     python -m closer_ai.live.bench --runs 10 --cases price --poll 0.5
     python -m closer_ai.live.bench --precision      # 14 probe lines once each: shown right / false shown
     python -m closer_ai.live.bench --sequences      # live sequences: is the NEW lead line the target?
+    python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented, extraction latency
 
 Each run is a fresh meeting: one closer line, then the case's lead line. The lead line goes through
 `Runtime.receive` (background worker, as from the extension), and a poller calls
@@ -24,6 +25,7 @@ from typing import Any
 
 from closer_ai.ai.ollama_provider import OllamaClassificationProvider
 from closer_ai.demo.analyze_call import ContextGuard
+from closer_ai.live.commercial_state import fact_key
 from closer_ai.live.server import Runtime, parse_utterance
 from closer_ai.live.session import LiveConfig
 
@@ -88,6 +90,51 @@ METRICS = ("queue_wait_ms", "classifier_latency_ms", "classifier_ollama_ms", "cl
            "end_to_end_latency_ms", "displayed_latency_ms")
 
 
+Q_DECISION = ("closer", "Além de você, alguém participa da decisão?")
+# (name, lines, expected): expected = field -> needles (folded words a fact's key must contain); fields not
+# named must stay empty, except "objections" (the objection engine's, checked only when named).
+COMMERCIAL = [
+    ("stakeholder", [Q_DECISION, ("lead", "Sim, meu sócio.")], {"stakeholders": ["socio"]}),
+    ("pain", [("closer", CLOSER_LINE), ("lead", "Hoje fazemos tudo manualmente.")], {"pain_points": ["manual"]}),
+    ("impact", [("closer", "E como isso afeta vocês?"), ("lead", "A equipe perde três horas por dia nisso.")],
+     {"impacts": ["tres horas"]}),
+    ("buying_signal", [("closer", "Faz sentido para vocês?"), ("lead", "Se funcionar, quero começar ainda este mês.")],
+     {"buying_signals": ["comecar"]}),
+    ("objection", [("closer", "O que achou?"), ("lead", "Gostei, mas achei muito caro.")],
+     {"objections": ["PRICE_BUDGET"]}),
+    ("neutral", [("closer", CLOSER_LINE), ("lead", "Hoje temos cinco pessoas no time.")], {}),
+    ("next_step", [("closer", "Te mando a proposta e marcamos quinta às 10?"), ("lead", "Fechado, quinta às 10 então.")],
+     {"next_steps": ["quinta"]}),
+    ("commercial_term", [("closer", "Quanto vocês investem hoje?"),
+                         ("lead", "Hoje pagamos uns dois mil por mês na ferramenta atual.")],
+     {"commercial_terms": ["dois mil"]}),
+    ("dedup", [Q_DECISION, ("lead", "Sim, meu sócio."), ("closer", "Certo."), ("lead", "Preciso validar com meu sócio.")],
+     {"stakeholders": ["socio"], "decision_process": ["validar"]}),
+    ("role_update", [Q_DECISION, ("lead", "Sim, meu sócio."), ("closer", "E qual o papel dele?"),
+                     ("lead", "Ele é quem dá a palavra final.")], {"stakeholders": ["socio"], "roles": ["final_decision_maker"]}),
+    ("manual_sequence", [("closer", CLOSER_LINE), ("lead", "É tudo manual."), ("lead", "Isso faz a equipe perder muito tempo."),
+                         ("closer", "Quem participa da decisão?"), ("lead", "Meu sócio também."),
+                         ("lead", "Gostei, mas achei caro."), ("lead", "Se a gente resolver isso, quero começar este mês.")],
+     {"pain_points": ["manual"], "impacts": ["tempo"], "stakeholders": ["socio"], "buying_signals": ["comecar"],
+      "objections": ["PRICE_BUDGET"]}),
+]
+
+
+def score_commercial(state: dict, expected: dict) -> dict:
+    """Missing expected facts (FN) and facts nobody expected (FP), per field."""
+    fn, fp = [], []
+    for name, facts in state.items():
+        if name == "objections" and name not in expected:
+            continue
+        needles = expected.get(name, [])
+        keys = [fact_key(f["value"]) if name != "objections" else f["value"] for f in facts]
+        fn += [f"{name}:{n}" for n in needles if not any(n in k for k in keys)]
+        fp += [f"{name}:{k}" for k in keys if not any(n in k for n in needles)]
+    roles = [f.get("role") for f in state["stakeholders"]]
+    fn += [f"role:{r}" for r in expected.get("roles", []) if r not in roles]
+    return {"missing": fn, "invented_or_unexpected": fp}
+
+
 def flat(t: dict) -> dict:
     """The timing record with the Ollama usage fields lifted to top level."""
     out = {k: v for k, v in t.items() if not isinstance(v, dict)}
@@ -148,6 +195,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--poll", type=float, default=0.5, help="sidebar poll interval (s)")
     p.add_argument("--precision", action="store_true", help="run the PROBE lines once each instead of the cases")
     p.add_argument("--sequences", action="store_true", help="run the live SEQUENCES (latest-utterance anchoring)")
+    p.add_argument("--commercial", action="store_true", help="run the COMMERCIAL cases (Commercial State v0)")
+    p.add_argument("--no-commercial", action="store_true", help="disable commercial facts extraction (A/B)")
     p.add_argument("--model", default="qwen3:8b")
     p.add_argument("--num-ctx", type=int, default=4096)
     p.add_argument("--reserve-tokens", type=int, default=1024)
@@ -155,12 +204,43 @@ def main(argv: list[str] | None = None) -> int:
 
     ollama = OllamaClassificationProvider(a.model, timeout=120.0, num_ctx=a.num_ctx)
     provider = ContextGuard(ollama, num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
-    runtime = Runtime(provider, LiveConfig(), {"Closer Teste"}, log=lambda _s: None)
+    runtime = Runtime(provider, LiveConfig(commercial_facts=not a.no_commercial), {"Closer Teste"}, log=lambda _s: None)
 
     t0 = time.time()
     ollama.classify('Return {"ok": true} as JSON.')  # warm-up: load the model; reported, not measured
     print(json.dumps({"warmup_ms": round((time.time() - t0) * 1000),
                       "load_ms": round(ollama.last_usage.get("load_duration", 0) / 1e6)}), flush=True)
+
+    if a.commercial:
+        facts_runs: list[dict] = []
+        runtime._facts = lambda t: facts_runs.append(t)  # keep each extraction's technical record
+        rows = []
+        for i, (name, lines, expected) in enumerate(COMMERCIAL):
+            mid, base, start = f"commercial-{i}", time.time() - 60, len(facts_runs)
+            for seq, (role, text) in enumerate(lines, 1):
+                runtime.receive(parse_utterance({"meeting_id": mid, "speaker": "Closer Teste" if role == "closer"
+                                                 else "Lead Teste", "text": text, "timestamp": base + seq * 8,
+                                                 "sequence": seq}, runtime.closer_names, base + seq * 8),
+                                background=False)
+            s = runtime.sessions[mid]
+            state = s.commercial.view()
+            rows.append({"case": name, **score_commercial(state, expected),
+                         "state": {k: [f"{f['value']}{'/' + f['role'] if f.get('role') else ''} {f['segment_ids']}"
+                                       for f in v] for k, v in state.items() if v},
+                         "recommendation": s.current().category if s.current() else None,
+                         "rejected": [r for t in facts_runs[start:] for r in t.get("rejected", [])]})
+            print(json.dumps(rows[-1], ensure_ascii=False), flush=True)
+        lat = [t["latency_ms"] for t in facts_runs if t.get("outcome") in ("EXTRACTED", "ERROR")]
+        print(json.dumps({"commercial": {
+            "cases_exact": f"{sum(not r['missing'] and not r['invented_or_unexpected'] for r in rows)}/{len(rows)}",
+            "missing_facts": sum(len(r["missing"]) for r in rows),
+            "unexpected_facts": sum(len(r["invented_or_unexpected"]) for r in rows),
+            "extraction_calls": len(lat), "skipped_short": sum(t.get("outcome") == "SKIPPED_SHORT" for t in facts_runs),
+            "errors": sum(t.get("outcome") == "ERROR" for t in facts_runs),
+            "extraction_ms_median": statistics.median(lat) if lat else None, "extraction_ms_max": max(lat, default=None),
+            "lead_lines": sum(r == "lead" for _, ls, _ in COMMERCIAL for r, _ in ls),
+        }}, indent=1), flush=True)
+        return 0
 
     if a.sequences:
         rows = []

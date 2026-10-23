@@ -138,6 +138,10 @@ com retry/idempotência/taxonomia de falhas; runtime exclusivo; `/health`; schem
 no live: soak de 30 min com 0 erros técnicos; recovery via `/rehydrate` sem reanálise). Follow-ups:
 **latest-utterance anchoring / precision** (nova objeção ignorada com objeção antiga na janela) e
 memória/latência do modelo (P1, Otávio). Detalhes no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md).
+Latest-utterance anchoring mergeado (#43). **Commercial State v0** (branch `feat/commercial-state-v0`):
+estado factual da call (dor, impacto, stakeholders, processo de decisão, buying signals, objeções do
+engine, termos, próximos passos), cada fato com `segment_ids`, grounding determinístico e sem UX nova
+(só no painel ••• → Avançado); fundação para B2/B3, que seguem não implementados.
 Depois, a decidir
 entre os itens do backlog no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented):
 B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Opportunity Detection. B2 e
