@@ -144,6 +144,9 @@ engine, termos, próximos passos), cada fato com `segment_ids`, grounding determ
 (só no painel ••• → Avançado); fundação para B2/B3, que seguem não implementados. **Post-call Brief v0**
 (branch `feat/post-call-brief-v0`): `POST /finalize` → brief JSON/Markdown determinístico a partir do
 Commercial State (sem LLM, sem reclassificar; riscos determinísticos; idempotente).
+**Latency P1** (branch `perf/live-latency-v1`): fast path determinístico para PRICE/AUTHORITY
+inequívocos (pula só o classifier; displayed ~14,5 s → ~6 s nesses casos, precisão igual); classifier
+menor (qwen3:4b) e contexto reduzido rejeitados; KV q8_0 opcional, não validado. Ver [doc](../product/LIVE_MEET_COPILOT_V0.md#latency-p1-perflive-latency-v1-2026-10-23).
 Depois, a decidir
 entre os itens do backlog no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented):
 B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Opportunity Detection. B2 e

@@ -241,9 +241,6 @@ class LiveConfig:
     arm: Arm = "E1"
     # Deterministic fast path for unambiguous PRICE / AUTHORITY lines (skips the LLM classifier only).
     fast_path: bool = True
-    # Classifier context: 0 = the whole rolling window (default); N = only the N speaker turns before the
-    # target lead turn (+ that turn). Guidance and grounding always see the whole window.
-    classifier_context_turns: int = 0
     # Commercial facts extraction (Commercial State): on/off, context lines before the first new lead
     # line, and lines per call.
     commercial_facts: bool = True
@@ -373,8 +370,6 @@ class LiveSalesSession:
     # Temporary debug for the first real-Meet tests (`--debug`): stage log + last-event summary for the panel.
     debug: Callable[..., None] | None = None
     debug_state: dict[str, Any] = field(default_factory=dict)
-    # P1: a separate (e.g. smaller) model for the classifier only; None = `provider` (default, unchanged).
-    classifier_provider: ClassificationProvider | None = None
     fast_path_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys(
         ("attempts", "hits", "llm_calls_saved"), 0))
     fast_path_by_category: dict[str, int] = field(default_factory=dict)
@@ -388,10 +383,6 @@ class LiveSalesSession:
     fact_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
         "extractions", "rebuild_extractions", "extraction_errors", "events_accepted", "events_rejected",
         "facts_added", "facts_updated"), 0))
-
-    @property
-    def classifier(self) -> ClassificationProvider:
-        return self.classifier_provider or self.provider
 
     def _dbg(self, tag: str, **fields: Any) -> None:
         if self.debug:
@@ -582,8 +573,7 @@ class LiveSalesSession:
             outcome, reason = self._decide(window, new_seqs, t)
         except (OllamaError, MalformedResponseError, InputTooLargeError) as exc:  # live: no recommendation, no crash
             outcome, reason = "NO_RECOMMENDATION", f"ERROR:{type(exc).__name__}"
-            stage_provider = self.provider if t.get("policy_finished_at") else self.classifier
-            t.update(error_type=error_type(exc), error_detail=str(exc)[:200], error_usage=_usage(stage_provider),
+            t.update(error_type=error_type(exc), error_detail=str(exc)[:200], error_usage=_usage(self.provider),
                      error_stage="guidance" if t.get("policy_finished_at") else "classifier")
         except Exception as exc:  # noqa: BLE001 - any other failure must still finish the analysis below,
             # or active_analysis stays set and the dock shows "Analisando..." forever
@@ -661,11 +651,10 @@ class LiveSalesSession:
         else:
             t["classification_source"] = "llm"
             # structured: the classifier's own output schema, enforced by Ollama (see CLASSIFIER_SCHEMA)
-            run = classify_call(self._classifier_call(window, targets, call), self.config.arm, self.classifier,
-                                self.classification_kb, structured=True,
+            run = classify_call(call, self.config.arm, self.provider, self.classification_kb, structured=True,
                                 target_segment_ids=targets)
             detection, raw_episodes, spans = run.call_detection, run.episodes, run.uncertain_spans
-            t.update(classifier_finished_at=self.clock(), classifier=_usage(self.classifier),
+            t.update(classifier_finished_at=self.clock(), classifier=_usage(self.provider),
                      episodes=len(run.episodes))
             self._dbg("CLASSIFIER", source="llm", detection=run.call_detection,
                       validation_errors=list(run.validation_errors),
@@ -759,22 +748,6 @@ class LiveSalesSession:
                 self.open_objections.append(episode.category)
             t["recommendation_id"] = t["_new_rec"].id
         return "RECOMMENDED", "GUIDED"
-
-    def _classifier_call(self, window: list[LiveUtterance], targets: tuple[str, ...], call: Call) -> Call:
-        """The classifier's input: the whole window, or only the turns right before the target lead turn."""
-        n = self.config.classifier_context_turns
-        if n <= 0:
-            return call
-        first = next(i for i, u in enumerate(window) if self._sid(u.sequence) in targets)
-        while first and window[first - 1].speaker == window[first].speaker:  # the target's whole lead turn
-            first -= 1
-        start, turns = first, 0
-        while start and turns < n:
-            turns += 1
-            speaker = window[start - 1].speaker
-            while start and window[start - 1].speaker == speaker:
-                start -= 1
-        return self._window_call(window[start:])
 
     @staticmethod
     def _qualifies(e: EpisodePrediction, new_ids: set[str], allowed: set[str]) -> bool:

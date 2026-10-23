@@ -1,4 +1,4 @@
-"""P1 latency: deterministic fast path + separate classifier model. No real Ollama."""
+"""P1 latency: deterministic fast path (+ classifier context). No real Ollama."""
 from __future__ import annotations
 
 import pytest
@@ -6,7 +6,6 @@ from test_live_session import FakeProvider, _live, _say  # same folder
 
 from closer_ai.ai.objection_guidance import load_objection_knowledge
 from closer_ai.demo.analyze_call import CLASSIFICATION_KB, GUIDANCE_KB
-from closer_ai.live.server import Runtime, parse_utterance
 from closer_ai.live.session import LiveConfig, LiveSalesSession, fast_path_category
 
 
@@ -23,10 +22,9 @@ class Clock:
         return self.now
 
 
-def _session(kb, provider=None, classifier=None, **cfg):
+def _session(kb, provider=None, **cfg):
     provider, clock = provider or FakeProvider(), Clock()
-    s = LiveSalesSession("m1", provider, kb, CLASSIFICATION_KB, LiveConfig(**cfg), clock=clock,
-                         classifier_provider=classifier)
+    s = LiveSalesSession("m1", provider, kb, CLASSIFICATION_KB, LiveConfig(**cfg), clock=clock)
     return s, provider, clock
 
 
@@ -114,31 +112,6 @@ def test_fast_path_can_be_turned_off(kb):
     t = _live(s, clock, [("lead", "Gostei da proposta, mas achei muito caro.")])
     assert t["classification_source"] == "llm" and _classifier_calls(provider) == 1
     assert s.fast_path_counters["attempts"] == 0
-
-
-def test_separate_classifier_model_gets_only_the_classifier_call(kb):
-    main, small = FakeProvider(), FakeProvider()
-    s, _, clock = _session(kb, main, classifier=small, fast_path=False)
-    _live(s, clock, [("lead", "Gostei da proposta, mas achei muito caro.")])
-    assert _classifier_calls(small) == 1 and small.guidance_calls() == 0
-    assert _classifier_calls(main) == 0 and main.guidance_calls() == 1  # guidance stays on the main model
-
-
-def test_default_is_one_model_for_everything(kb):
-    s, provider, _ = _session(kb)
-    assert s.classifier is provider
-    rt = Runtime(provider, LiveConfig(), {"Matheus"}, log=lambda _: None)
-    assert rt.session("m").classifier is provider and LiveConfig().fast_path is True
-
-
-def test_runtime_passes_the_classifier_model_to_sessions(kb):
-    main, small = FakeProvider(), FakeProvider()
-    rt = Runtime(main, LiveConfig(fast_path=False), {"Matheus"}, log=lambda _: None, classifier_provider=small)
-    rt.knowledge = kb
-    rt.receive(parse_utterance({"meeting_id": "m", "speaker": "Lead", "text": "Gostei da proposta, mas achei muito caro.",
-                                "sequence": 1}, rt.closer_names, 1.0), background=False)
-    assert _classifier_calls(small) == 1 and _classifier_calls(main) == 0
-    assert rt.sessions["m"].current().category == "PRICE_BUDGET"
 
 
 def test_post_call_brief_is_the_same_with_the_fast_path(kb):

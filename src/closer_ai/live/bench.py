@@ -342,11 +342,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--scenarios", default="", help="--latency: comma-separated scenario names (default: all)")
     p.add_argument("--repeat", type=int, default=1, help="--authority: runs per case")
     p.add_argument("--no-fast-path", action="store_true", help="always use the LLM classifier")
-    p.add_argument("--context-turns", type=int, default=0, help="classifier_context_turns (0 = whole window)")
     p.add_argument("--history", type=int, default=0,
                    help="--latency: prefix each scenario with this many earlier (neutral) call lines")
-    p.add_argument("--classifier-model", default=None, help="separate classifier model (default: --model)")
-    p.add_argument("--classifier-num-ctx", type=int, default=None)
     p.add_argument("--model", default="qwen3:8b")
     p.add_argument("--num-ctx", type=int, default=4096)
     p.add_argument("--reserve-tokens", type=int, default=1024)
@@ -354,22 +351,14 @@ def main(argv: list[str] | None = None) -> int:
 
     ollama = OllamaClassificationProvider(a.model, timeout=120.0, num_ctx=a.num_ctx)
     provider = ContextGuard(ollama, num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
-    classifier, c_ollama = None, None
-    if a.classifier_model or a.classifier_num_ctx:
-        ctx = a.classifier_num_ctx or a.num_ctx
-        c_ollama = OllamaClassificationProvider(a.classifier_model or a.model, timeout=120.0, num_ctx=ctx)
-        classifier = ContextGuard(c_ollama, num_ctx=ctx, reserve_tokens=min(a.reserve_tokens, ctx // 2))
-    runtime = Runtime(provider, LiveConfig(commercial_facts=not a.no_commercial, fast_path=not a.no_fast_path,
-                                           classifier_context_turns=a.context_turns),
-                      {"Closer Teste"}, log=lambda _s: None, classifier_provider=classifier)
+    runtime = Runtime(provider, LiveConfig(commercial_facts=not a.no_commercial, fast_path=not a.no_fast_path),
+                      {"Closer Teste"}, log=lambda _s: None)
 
     if a.latency and a.cold:
         unload_models()
     t0 = time.time()
     if not (a.latency and a.cold):
         ollama.classify('Return {"ok": true} as JSON.')  # warm-up: load the model; reported, not measured
-        if c_ollama is not None:
-            c_ollama.classify('Return {"ok": true} as JSON.')
     print(json.dumps({"warmup_ms": round((time.time() - t0) * 1000),
                       "load_ms": round(ollama.last_usage.get("load_duration", 0) / 1e6)}), flush=True)
 

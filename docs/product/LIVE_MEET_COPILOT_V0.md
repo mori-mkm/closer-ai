@@ -586,6 +586,59 @@ same lead turn. The scope is now the new lead line(s) plus the other speaker's t
 of them. The re-cite is rejected (`NOT_IN_TARGET`), and the commercial bench is unchanged at 10/11
 with 0 invented.
 
+## Latency P1 (`perf/live-latency-v1`, 2026-10-23)
+
+Bottleneck (measured with `python -m closer_ai.live.bench --latency`): output tokens, not the prompt.
+- The classifier generates ~136 tokens at ~16 tok/s (~8.4 s).
+- Guidance generates ~96 tokens (~5.5 s).
+- qwen3:8b has only 27/37 layers on the GPU (6 GB).
+- Prompt eval is ~1 s for ~1.3–1.5k tokens.
+- `think: false` was already sent.
+
+**Kept: the deterministic fast path** (`fast_path_category` in `session.py`, on by default,
+`--no-fast-path` turns it off).
+- **What it does:** one new lead line that clearly states a price objection ("achei muito caro",
+  "não tenho orçamento") or a blocking third-party decision ("preciso falar com meu sócio antes de
+  fechar") skips the LLM classifier call.
+- **What still runs:** validation, anchoring, the CORROBORATION gates, cooldown, retrieval, guidance
+  and grounding run unchanged.
+- **What goes to the LLM, as before:**
+  - negations ("não achei caro");
+  - "caro, mas vale";
+  - questions and competitor comparisons;
+  - discovery answers ("sim, meu sócio");
+  - timing markers and continuations (more than one target line).
+- **Observability:** `classification_source` (`deterministic_fast_path | llm`) in each analysis; the
+  `fast_path` counters (attempts / hits / llm_calls_saved / by_category) in the `--debug` view.
+
+Matrix: 14 invented scenarios × 5 runs, warm, Commercial State off.
+
+| Config | Classifier median | Guidance median | Displayed median / p90 | Accuracy | Discovery FP | Authority |
+|---|---|---|---|---|---|---|
+| A: baseline 8b | 8.6 s | 5.9 s | 14.8 / 15.8 s | 60/70 | 0 | 15/15 |
+| C: + fast path | 0 s on hits (9.0 s LLM) | 5.9 s | **~6.0 s on hits**, 15.0 s overall | 60/70 | 0 | 15/15 |
+| D: qwen3:4b classifier + 8b guidance | 2.9 s | 12.7 s (6.6 s reload) | 15.9 / 19.8 s | **40/70** | 0 | **5/15** |
+| E1: KV cache q8_0, 24 of 70 runs | 8.3 s | 5.4 s | 13.7 / 14.5 s | same errors as A | 0 | 6/6 |
+
+- **C:** the fast path hit 20 of 70 runs (obvious price, 3 authority blockers). On those runs,
+  displayed went from ~14.5 s to ~6 s.
+- **The 10 errors in A and C are the same:**
+  - 5 FPs, "Não achei caro" → PRICE: the LLM's error; the fast path sends it to the LLM.
+  - 5 FNs on need/value: guidance failed grounding (fail-closed).
+- **Rejected:**
+  - **Smaller classifier (D).** qwen3:4b and qwen3:8b do not fit in 6 GB together, so every
+    guidance call reloads the 8b. It was also much worse at detecting.
+  - **Classifier context cut to the last turn.** Same accuracy and a shorter output tail
+    (classifier p90 19.6 s → 9.9 s with 10 history lines). But the displayed gain (16.8 s → 15.5 s)
+    was mostly Ollama's prompt cache, and only one context-reference case was measured.
+- **Optional, environment only (no code):** `OLLAMA_KV_CACHE_TYPE=q8_0` with
+  `OLLAMA_FLASH_ATTENTION=1`.
+  - Effect: KV cache 576 → 306 MB, 28/37 layers on the GPU, about −1 s displayed.
+  - The measurement was cut at 24 of 70 runs by RAM pressure on the dev machine, so it is not
+    validated.
+  - A separate classifier `num_ctx` on the same model would make Ollama reload the model, so it was
+    not tried.
+
 ## Runtime configuration (measured)
 
 Default: qwen3:8b, arm **E1**, `num_ctx` **4096**, 1024 tokens kept for the output. Measured on
@@ -629,11 +682,13 @@ python -m closer_ai.live.server --closer "Matheus"
 python -m closer_ai.live.bench --runs 5
 python -m closer_ai.live.bench --precision
 python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented
+python -m closer_ai.live.bench --latency --repeat 5 --out lat.jsonl   # per-stage latency matrix
 ```
 
 Options:
 - `--window-seconds`, `--window-utterances`, `--cooldown`, `--ttl`: the live policy above;
 - `--arm`, `--num-ctx`, `--reserve-tokens`: the model configuration;
+- `--no-fast-path`: always use the LLM classifier (no deterministic fast path for obvious PRICE/AUTHORITY);
 - `--no-commercial-state`: no commercial facts extraction (no extra LLM call); objection analysis is
   unchanged;
 - `--keep-alive` (default `30m`): how long Ollama keeps the model loaded; the runtime also loads it at

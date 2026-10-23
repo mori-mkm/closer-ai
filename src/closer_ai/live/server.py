@@ -85,9 +85,8 @@ class Runtime:
     """Sessions by meeting_id + the single-flight analysis worker."""
 
     def __init__(self, provider: Any, config: LiveConfig, closer_names: set[str], log=print,
-                 debug: bool = False, classifier_provider: Any = None) -> None:
+                 debug: bool = False) -> None:
         self.provider, self.config, self.log, self.debug = provider, config, log, debug
-        self.classifier_provider = classifier_provider  # None = `provider` for the classifier too (default)
         self._last_poll: dict[str, str] = {}
         self.closer_names = {n.lower() for n in closer_names} | set(SELF_LABELS)
         self.knowledge = load_objection_knowledge(GUIDANCE_KB)
@@ -104,8 +103,7 @@ class Runtime:
             if meeting_id not in self.sessions:
                 self.sessions[meeting_id] = LiveSalesSession(meeting_id, self.provider, self.knowledge,
                                                              CLASSIFICATION_KB, self.config,
-                                                             debug=self.dbg if self.debug else None,
-                                                             classifier_provider=self.classifier_provider)
+                                                             debug=self.dbg if self.debug else None)
             return self.sessions[meeting_id]
 
     def dbg(self, tag: str, **fields: Any) -> None:
@@ -412,9 +410,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--model", default="qwen3:8b")
     p.add_argument("--num-ctx", type=int, default=4096)
-    p.add_argument("--classifier-model", default=None,
-                   help="a separate model for the objection classifier only (default: --model)")
-    p.add_argument("--classifier-num-ctx", type=int, default=None, help="classifier num_ctx (default: --num-ctx)")
     p.add_argument("--no-fast-path", action="store_true",
                    help="always use the LLM classifier (no deterministic fast path for obvious PRICE/AUTHORITY)")
     p.add_argument("--reserve-tokens", type=int, default=1024, help="output budget kept free in num_ctx")
@@ -436,27 +431,17 @@ def main(argv: list[str] | None = None) -> int:
 
     ollama = OllamaClassificationProvider(a.model, timeout=a.timeout, num_ctx=a.num_ctx, keep_alive=a.keep_alive or None)
     provider = ContextGuard(ollama, num_ctx=a.num_ctx, reserve_tokens=a.reserve_tokens)
-    classifier, classifier_ollama = None, None
-    if a.classifier_model or a.classifier_num_ctx:
-        ctx = a.classifier_num_ctx or a.num_ctx
-        classifier_ollama = OllamaClassificationProvider(a.classifier_model or a.model, timeout=a.timeout, num_ctx=ctx,
-                                                         keep_alive=a.keep_alive or None)
-        classifier = ContextGuard(classifier_ollama, num_ctx=ctx, reserve_tokens=min(a.reserve_tokens, ctx // 2))
     config = LiveConfig(window_seconds=a.window_seconds, max_window_utterances=a.window_utterances,
                         cooldown_seconds=a.cooldown, ttl_seconds=a.ttl, arm=a.arm,
                         commercial_facts=not a.no_commercial_state, fast_path=not a.no_fast_path)
     names = {n.strip() for n in a.closer.split(",") if n.strip()}
-    runtime = Runtime(provider, config, names, log=lambda s: print(s, file=sys.stderr, flush=True), debug=a.debug,
-                      classifier_provider=classifier)
+    runtime = Runtime(provider, config, names, log=lambda s: print(s, file=sys.stderr, flush=True), debug=a.debug)
     if a.replay:
         replay(runtime, a.replay, a.delay)
         return 0
     server = bind_or_explain(a.port, make_handler(runtime))
     threading.Thread(target=warm_up, args=(ollama, runtime.log, runtime), daemon=True).start()
-    if classifier_ollama is not None:
-        threading.Thread(target=warm_up, args=(classifier_ollama, runtime.log), daemon=True).start()
     print(f"AI Closer live runtime on http://127.0.0.1:{a.port} ({a.model}, {a.arm}, num_ctx {a.num_ctx}"
-          f"{f'; classifier {classifier_ollama.model} @ {classifier_ollama.num_ctx}' if classifier_ollama else ''}"
           f"{'; no fast path' if a.no_fast_path else ''})"
           f" closer names: {sorted(runtime.closer_names)}{' [DEBUG]' if a.debug else ''}", file=sys.stderr, flush=True)
     try:
