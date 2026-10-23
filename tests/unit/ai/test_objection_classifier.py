@@ -96,9 +96,12 @@ def test_facts_render_segment_ids_roles_and_order_only():
 
 def test_classifier_accepts_no_deal_outcome_or_crm_input():
     params = set(inspect.signature(classify_call).parameters)
-    # `structured` is a generation option (provider-enforced output schema), not call/deal data
-    assert params == {"call", "arm", "provider", "knowledge_root", "knowledge_git_sha", "structured"}
-    assert set(inspect.signature(build_prompt).parameters) == {"call", "arm", "knowledge_root"}
+    # `structured` (provider-enforced output schema) and `target_segment_ids` (which of the call's own
+    # segments a live analysis is about) are options over the call itself, not call/deal data
+    assert params == {"call", "arm", "provider", "knowledge_root", "knowledge_git_sha", "structured",
+                      "target_segment_ids"}
+    assert set(inspect.signature(build_prompt).parameters) == {"call", "arm", "knowledge_root",
+                                                               "target_segment_ids"}
 
 
 def test_prompt_uses_no_call_metadata_beyond_segments():
@@ -297,3 +300,14 @@ def test_structured_mode_sends_the_exact_output_schema_and_still_validates():
     p = Recording(response())
     classify_call(CALL, "E0", p)
     assert p.kw == {}  # default (eval runner, post-call): plain JSON, unchanged
+
+
+def test_live_target_is_opt_in_and_names_only_real_segments():
+    plain = build_prompt(CALL, "E1")
+    assert "LIVE TARGET" not in plain  # eval / post-call prompts unchanged
+    last = CALL.segments[-1].segment_id
+    targeted = build_prompt(CALL, "E1", target_segment_ids=(last,))
+    assert f"The lead just said: {last}." in targeted
+    assert targeted.replace(targeted[targeted.index("LIVE TARGET"):targeted.index("CLASSIFICATION GUIDE")], "") == plain
+    with pytest.raises(ValueError, match="not in the call"):
+        build_prompt(CALL, "E1", target_segment_ids=("nope",))

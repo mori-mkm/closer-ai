@@ -231,13 +231,36 @@ def render_call_facts(call: Call) -> str:
     return "\n".join(lines)
 
 
+def render_live_target(call: Call, target_segment_ids: tuple[str, ...]) -> str:
+    """LIVE TARGET: which segments this analysis is about (live copilot). The rest of FACTS FROM CALL is context."""
+    known = {s.segment_id for s in call.segments}
+    missing = [i for i in target_segment_ids if i not in known]
+    if missing:
+        raise ValueError(f"target segment ids not in the call: {missing}")
+    ids = ", ".join(target_segment_ids)
+    return f"""LIVE TARGET
+
+This is a live call. The lead just said: {ids}. Analyze ONLY what the target segment(s) say.
+- Annotate an objection only if a target segment expresses it, alone or completing what the same
+  lead said right before it.
+- Earlier segments are context: use them to understand references, short answers and
+  continuations. Never annotate an objection that is only in earlier segments, even if it is still
+  open; it was already analyzed.
+- Every episode's objection_segment_ids must include a target segment.
+- Most lead lines are not objections: describing a pain, a problem, their current process, a fact or
+  agreement is NO_OBJECTION unless it is stated as a reason not to move forward.
+- If the target segments express no objection, return NO_OBJECTION."""
+
+
 def _assemble(
-    call: Call, arm: str, knowledge_root: Path | None
+    call: Call, arm: str, knowledge_root: Path | None, target_segment_ids: tuple[str, ...] = ()
 ) -> tuple[str, KnowledgeContext | None]:
     if arm not in ARMS:
         raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
     knowledge = None
     blocks = [TASK_RULES, render_call_facts(call)]
+    if target_segment_ids:
+        blocks.append(render_live_target(call, tuple(target_segment_ids)))
     if arm == "E1":
         blocks.append(CLASSIFICATION_GUIDE)
     elif arm == "E2":
@@ -249,9 +272,10 @@ def _assemble(
     return "\n\n".join(blocks) + "\n", knowledge
 
 
-def build_prompt(call: Call, arm: Arm, knowledge_root: Path | None = None) -> str:
-    """The exact text a provider receives for this call and arm."""
-    return _assemble(call, arm, knowledge_root)[0]
+def build_prompt(call: Call, arm: Arm, knowledge_root: Path | None = None,
+                 target_segment_ids: tuple[str, ...] = ()) -> str:
+    """The exact text a provider receives for this call and arm (+ the live target, when given)."""
+    return _assemble(call, arm, knowledge_root, target_segment_ids)[0]
 
 
 # --- response parsing (shape only) ------------------------------------------------------------
@@ -478,6 +502,7 @@ def classify_call(
     knowledge_root: Path | None = None,
     knowledge_git_sha: str | None = None,
     structured: bool = False,
+    target_segment_ids: tuple[str, ...] = (),
 ) -> ClassificationRun:
     """Build the arm's prompt, call the provider once, parse, validate, return the run record.
 
@@ -486,7 +511,8 @@ def classify_call(
     """
     if not isinstance(call, Call):
         raise TypeError(f"call must be a canonical Call, got {type(call).__name__}")
-    prompt, knowledge = _assemble(call, arm, knowledge_root)
+    # target_segment_ids (live copilot): the newest lead segments are what is analyzed; the rest is context
+    prompt, knowledge = _assemble(call, arm, knowledge_root, target_segment_ids)
     # structured (live copilot): the provider enforces CLASSIFIER_SCHEMA; the prompt is unchanged
     response = provider.classify(prompt, schema=CLASSIFIER_SCHEMA) if structured else provider.classify(prompt)
     call_detection, episodes, spans = _parse(response)

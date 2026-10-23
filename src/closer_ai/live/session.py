@@ -234,6 +234,21 @@ def error_type(exc: BaseException) -> str:
     return "OTHER"
 
 
+def _target_turns(call: Call, new_ids: set[str]) -> set[str]:
+    """Segment ids an anchored episode may use: the uninterrupted lead turns (consecutive segments of the
+    same speaker) that contain a new lead segment. Earlier lead turns, after another speaker spoke, are
+    context only."""
+    turns: list[list[TranscriptSegment]] = []
+    for seg in sorted(call.segments, key=lambda s: s.segment_index):
+        if turns and turns[-1][-1].speaker_id == seg.speaker_id:
+            turns[-1].append(seg)
+        else:
+            turns.append([seg])
+    # ponytail: a long lead monologue is one turn, so an old objection inside it could still be folded
+    # into a new episode there; the LIVE TARGET prompt is the guard for that case. Add a time gap if seen.
+    return {s.segment_id for turn in turns if any(s.segment_id in new_ids for s in turn) for s in turn}
+
+
 @dataclass
 class LiveSalesSession:
     meeting_id: str
@@ -512,8 +527,14 @@ class LiveSalesSession:
         if not new_seqs:
             return "NO_RECOMMENDATION", "NO_PENDING_LEAD_UTTERANCE"
         call = self._window_call(window)
+        # Latest-utterance anchoring: the lead lines new since the last analysis are the TARGET (the newest
+        # is the trigger; older ones were superseded while waiting); the rest of the window is context.
+        new_ids = {self._sid(s) for s in new_seqs}
+        targets = tuple(seg.segment_id for seg in call.segments if seg.segment_id in new_ids)
+        t["target_segment_ids"] = list(targets)
         # structured: the classifier's own output schema, enforced by Ollama (see CLASSIFIER_SCHEMA)
-        run = classify_call(call, self.config.arm, self.provider, self.classification_kb, structured=True)
+        run = classify_call(call, self.config.arm, self.provider, self.classification_kb, structured=True,
+                            target_segment_ids=targets)
         t.update(classifier_finished_at=self.clock(), classifier=_usage(self.provider),
                  episodes=len(run.episodes))
         self._dbg("CLASSIFIER", detection=run.call_detection, validation_errors=list(run.validation_errors),
@@ -532,8 +553,8 @@ class LiveSalesSession:
             return "NO_RECOMMENDATION", "CLASSIFIER_INVALID"
         if run.call_detection != "OBJECTIONS_FOUND":
             return "NO_RECOMMENDATION", "NO_OBJECTION"
-        new_ids = {self._sid(s) for s in new_seqs}
-        candidates = [e for e in episodes if self._qualifies(e, new_ids)]
+        allowed = _target_turns(call, new_ids)
+        candidates = [e for e in episodes if self._qualifies(e, new_ids, allowed)]
         categories = {e.category for e in candidates}
         if not candidates:
             return "NO_RECOMMENDATION", "NO_QUALIFYING_EPISODE"
@@ -605,6 +626,10 @@ class LiveSalesSession:
         return "RECOMMENDED", "GUIDED"
 
     @staticmethod
-    def _qualifies(e: EpisodePrediction, new_ids: set[str]) -> bool:
+    def _qualifies(e: EpisodePrediction, new_ids: set[str], allowed: set[str]) -> bool:
+        """A NEW objection: it includes a new lead segment, and every objection segment is in the same
+        uninterrupted lead turn as one (a continuation). An objection from an earlier turn, alone or
+        folded together with the new line, never satisfies the current analysis."""
+        ids = set(e.objection_segment_ids)
         return (e.category_status == "PRESENT" and e.category in LABELS
-                and bool(set(e.objection_segment_ids) & new_ids))
+                and bool(ids & new_ids) and ids <= allowed)
