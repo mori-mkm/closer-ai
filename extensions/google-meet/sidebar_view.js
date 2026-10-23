@@ -40,6 +40,25 @@ function commercialLines(state) {
   return lines;
 }
 
+const COMPLIANCE_MARK = { SATISFIED: "✓", PENDING: "○", VIOLATED: "✗", NOT_APPLICABLE: "–", UNKNOWN: "?" };
+
+/** Playbook Compliance by stage (null when the runtime has none). A prohibited rule shows only when violated. */
+function complianceLines(c) {
+  if (!c) return null;
+  const lines = ["PLAYBOOK COMPLIANCE"];
+  for (const st of c.stage_summary || []) {
+    const rules = (c.rule_results || []).filter((r) => r.stage === st.stage
+      && !(r.class === "PROHIBITED" && r.status !== "VIOLATED"));
+    if (!rules.length) continue;
+    lines.push(`${st.stage} · ${st.title}`);
+    for (const r of rules) {
+      const ids = r.segment_ids && r.segment_ids.length ? ` [${r.segment_ids.join(", ")}]` : "";
+      lines.push(`${COMPLIANCE_MARK[r.status] || "?"} ${r.rule_id} ${r.title}${ids}`);
+    }
+  }
+  return lines;
+}
+
 /**
  * data: the runtime answer (or null when it is unreachable).
  * ctx: { runtimeOk, captionsOn, meetingId, health: {model_state}|null,
@@ -86,6 +105,7 @@ function dockView(data, ctx) {
   ];
   if (warning) basic.push(`Atenção: ${warning.text}`);
   const commercial = commercialLines(d.commercial_state);
+  const compliance = complianceLines(d.playbook_compliance);
   const brief = d.post_call_brief ? d.post_call_brief.markdown.trimEnd().split("\n") : null; // after finalize
   let technical = null;
   if (debug) {
@@ -112,6 +132,7 @@ function dockView(data, ctx) {
       `recommendations_created: ${rc.recommendations_created ?? "-"} · model_state: ${d.debug.model_state || "-"}`,
       `analysis_error_reasons: ${kv(d.debug.analysis_error_reasons || {})}`,
       `commercial: ${kv(d.debug.commercial_counters || {})}`,
+      `compliance_ms: ${d.debug.compliance_ms ?? "-"}`,
     ];
     if (a) technical.push(`active_segment: ${a.segment_id}${a.detected_category ? ` · ${a.detected_category}` : ""}`);
     if (rec) {
@@ -130,7 +151,7 @@ function dockView(data, ctx) {
     technical.push("", `meeting_id: ${ctx.meetingId}`);
   }
 
-  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, commercial, brief, technical } };
+  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, commercial, compliance, brief, technical } };
 }
 
 const DOCK_INITIAL = Object.freeze({ open: null, seenRecId: null, notifiedRecId: null, toastUntil: 0 });
@@ -177,5 +198,5 @@ function dockChrome(state, view, now) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { dockView, dockReducer, dockChrome, commercialLines, DOCK_INITIAL, TONES, TOAST_MS };
+  module.exports = { dockView, dockReducer, dockChrome, commercialLines, complianceLines, DOCK_INITIAL, TONES, TOAST_MS };
 }

@@ -49,6 +49,7 @@ from closer_ai.live.commercial_state import (
     objection_event,
     parse_facts,
 )
+from closer_ai.live.playbook import PlaybookComplianceState, evaluate, load_playbook
 from closer_ai.live.post_call_brief import PostCallBrief, build_brief
 from closer_ai.normalization.models import Call, Participant, TranscriptSegment
 
@@ -380,6 +381,7 @@ class LiveSalesSession:
     _facts_in_flight: int = 0  # extractions claimed but not applied yet (finalize waits for them)
     brief: PostCallBrief | None = None  # set once by finalize(); the same brief is returned after that
     _analysis_done_at: float = 0.0  # the last objection analysis finished (the closer usually answers now)
+    compliance_ms: float = 0.0  # last Playbook Compliance evaluation (deterministic, read-time only)
     fact_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
         "extractions", "rebuild_extractions", "extraction_errors", "events_accepted", "events_rejected",
         "facts_added", "facts_updated"), 0))
@@ -837,6 +839,19 @@ class LiveSalesSession:
         self._dbg("COMMERCIAL", **{k: v for k, v in t.items() if k != "usage"})
         return t
 
+    # --- playbook compliance ------------------------------------------------------------------------
+
+    def compliance(self) -> PlaybookComplianceState:
+        """Playbook Compliance of the call so far: a pure function of the Commercial State and the
+        transcript, recomputed when read (never on the recommendation's path, no LLM). Rebuilt for free
+        after a restart: rehydrated lines + the rebuilt Commercial State give the same result."""
+        with self.lock:
+            started = time.perf_counter()
+            state = evaluate(load_playbook(), self.commercial.view(),
+                             [(self._sid(u.sequence), u.role, u.text) for u in self.utterances])
+            self.compliance_ms = round((time.perf_counter() - started) * 1000, 2)
+            return state
+
     # --- post-call brief ----------------------------------------------------------------------------
 
     def busy(self) -> bool:
@@ -856,5 +871,6 @@ class LiveSalesSession:
         with self.lock:
             if self.brief is None:
                 self.brief = build_brief(self.meeting_id, self.commercial.view(), list(self.timings),
-                                         dict(self.counters), self.clock(), rebuilt=self._rehydrated_upto >= 0)
+                                         dict(self.counters), self.clock(), rebuilt=self._rehydrated_upto >= 0,
+                                         compliance=self.compliance().view())
             return self.brief

@@ -204,7 +204,7 @@
     if (ui.open === "history") renderHistory(view.history); else shownHistory = "";
     if (ui.open === "advanced") {
       const a = view.advanced;
-      $("adv").textContent = [...(a.brief ? [...a.brief, ""] : []), ...a.basic, ...(a.commercial ? ["", ...a.commercial] : []), ...(a.technical ? ["", ...a.technical]
+      $("adv").textContent = [...(a.brief ? [...a.brief, ""] : []), ...a.basic, ...(a.commercial ? ["", ...a.commercial] : []), ...(a.compliance ? ["", ...a.compliance] : []), ...(a.technical ? ["", ...a.technical]
         : ["", "Detalhes técnicos: inicie o runtime com --debug."])].join("\n");
     }
   }
