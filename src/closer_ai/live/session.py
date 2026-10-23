@@ -179,6 +179,45 @@ _AUTHORITY_BLOCKING = re.compile(
 CORROBORATION["AUTHORITY_INTERNAL_BUY_IN"] = _AUTHORITY_BLOCKING
 
 
+# Deterministic fast path (P1 latency): for a few unambiguous phrasings the LLM classifier call (~9-10 s,
+# mostly output tokens) is replaced by a rule. It only proposes the category of ONE new lead line; the rest
+# of the live policy (validation, anchoring, normalizations, CORROBORATION gates, cooldown, retrieval,
+# guidance + grounding) runs unchanged. Anything not clearly one category -> the LLM, as before.
+# ponytail: phrase patterns, precision over recall by design (PRICE_BUDGET, AUTHORITY_INTERNAL_BUY_IN only).
+_FAST_PRICE = re.compile(
+    r"\b(?:(?:achei|acho|achamos|ta|esta|ficou|ficaram|fica|e|eh|sao|muito|bem|meio|bastante|um pouco|tao)"
+    r" (?:\w+ )?(?:caro|caros|carissimo|carissima)|caro demais|caro pra (?:gente|nos|mim)"
+    r"|(?:nao|nem) (?:tenho|temos|tem|ha) (?:\w+ )?(?:orcamento|verba|budget)"
+    r"|(?:nao|nem) cabe no (?:\w+ )?orcamento|(?:acima|fora|alem) d[oa] (?:\w+ )?orcamento"
+    r"|sem (?:orcamento|verba)|estourou o (?:\w+ )?orcamento)\b")
+_FAST_AUTHORITY = re.compile(
+    r"\b(?:(?:precis\w*|tenho que|temos que|vou ter que|vamos ter que) (?:falar|conversar|consultar|validar|alinhar|ver)"
+    rf" com (?:um |uma )?{_THIRD_PARTY}"
+    r"|(?:nao|nem) (?:posso|podemos|consigo|conseguimos) (?:decidir|fechar|assinar) (?:isso |isto |nada )?sozinh\w*"
+    rf"|{_THIRD_PARTY} (?:precisa|tem que|vai ter que) (?:aprovar|validar|autorizar|dar o (?:ok|aval))"
+    r"|(?:so|somente) (?:consigo|posso|podemos|conseguimos) (?:avancar|seguir|fechar) depois d[aeo]s? "
+    r"(?:aprovacao|autorizacao|aval|ok)"
+    r")\b")
+# Never fast-path these: a negated price ("não achei caro"), price + acceptance ("caro, mas vale"), a
+# question, a comparison with someone else's price, or two categories at once (timing/need words).
+_FAST_PRICE_NEGATED = re.compile(r"\b(?:nao|nem|nunca) (?:\w+ )?(?:\w+ )?(?:caro|caros|carissim\w*|acima)\b")
+_FAST_BLOCKERS = re.compile(
+    r"\?|\bmas (?:vale|compensa|faz sentido|tudo bem|ok|cabe)\b|\b(?:concorrente|outra ferramenta|outro fornecedor"
+    r"|o outro|a outra)\b|\b(?:nao sei se|precisa disso|precisamos disso|nao resolve|nao faz sentido|barato)\b")
+
+
+def fast_path_category(text: str) -> str | None:
+    """The one category this lead line states unambiguously, or None (-> the LLM classifier)."""
+    t = _fold(text)
+    if _FAST_BLOCKERS.search(t) or _TIME_MARKER.search(t):
+        return None
+    price = bool(_FAST_PRICE.search(t)) and not _FAST_PRICE_NEGATED.search(t)
+    authority = bool(_FAST_AUTHORITY.search(t)) and bool(_AUTHORITY_BLOCKING.search(t))
+    if price == authority:  # neither, or both (mixed = ambiguous)
+        return None
+    return "PRICE_BUDGET" if price else "AUTHORITY_INTERNAL_BUY_IN"
+
+
 @dataclass(frozen=True)
 class LiveUtterance:
     meeting_id: str
@@ -200,6 +239,11 @@ class LiveConfig:
     cooldown_seconds: float = 25.0
     ttl_seconds: float = 90.0
     arm: Arm = "E1"
+    # Deterministic fast path for unambiguous PRICE / AUTHORITY lines (skips the LLM classifier only).
+    fast_path: bool = True
+    # Classifier context: 0 = the whole rolling window (default); N = only the N speaker turns before the
+    # target lead turn (+ that turn). Guidance and grounding always see the whole window.
+    classifier_context_turns: int = 0
     # Commercial facts extraction (Commercial State): on/off, context lines before the first new lead
     # line, and lines per call.
     commercial_facts: bool = True
@@ -329,6 +373,11 @@ class LiveSalesSession:
     # Temporary debug for the first real-Meet tests (`--debug`): stage log + last-event summary for the panel.
     debug: Callable[..., None] | None = None
     debug_state: dict[str, Any] = field(default_factory=dict)
+    # P1: a separate (e.g. smaller) model for the classifier only; None = `provider` (default, unchanged).
+    classifier_provider: ClassificationProvider | None = None
+    fast_path_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys(
+        ("attempts", "hits", "llm_calls_saved"), 0))
+    fast_path_by_category: dict[str, int] = field(default_factory=dict)
     # Commercial State (see commercial_state.py): facts, extraction high-water mark, technical counters.
     commercial: CommercialState = field(default_factory=CommercialState)
     _last_extracted_seq: int = -1
@@ -339,6 +388,10 @@ class LiveSalesSession:
     fact_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
         "extractions", "rebuild_extractions", "extraction_errors", "events_accepted", "events_rejected",
         "facts_added", "facts_updated"), 0))
+
+    @property
+    def classifier(self) -> ClassificationProvider:
+        return self.classifier_provider or self.provider
 
     def _dbg(self, tag: str, **fields: Any) -> None:
         if self.debug:
@@ -529,7 +582,8 @@ class LiveSalesSession:
             outcome, reason = self._decide(window, new_seqs, t)
         except (OllamaError, MalformedResponseError, InputTooLargeError) as exc:  # live: no recommendation, no crash
             outcome, reason = "NO_RECOMMENDATION", f"ERROR:{type(exc).__name__}"
-            t.update(error_type=error_type(exc), error_detail=str(exc)[:200], error_usage=_usage(self.provider),
+            stage_provider = self.provider if t.get("policy_finished_at") else self.classifier
+            t.update(error_type=error_type(exc), error_detail=str(exc)[:200], error_usage=_usage(stage_provider),
                      error_stage="guidance" if t.get("policy_finished_at") else "classifier")
         except Exception as exc:  # noqa: BLE001 - any other failure must still finish the analysis below,
             # or active_analysis stays set and the dock shows "Analisando..." forever
@@ -585,26 +639,52 @@ class LiveSalesSession:
         new_ids = {self._sid(s) for s in new_seqs}
         targets = tuple(seg.segment_id for seg in call.segments if seg.segment_id in new_ids)
         t["target_segment_ids"] = list(targets)
-        # structured: the classifier's own output schema, enforced by Ollama (see CLASSIFIER_SCHEMA)
-        run = classify_call(call, self.config.arm, self.provider, self.classification_kb, structured=True,
-                            target_segment_ids=targets)
-        t.update(classifier_finished_at=self.clock(), classifier=_usage(self.provider),
-                 episodes=len(run.episodes))
-        self._dbg("CLASSIFIER", detection=run.call_detection, validation_errors=list(run.validation_errors),
-                  episodes=[{"category": e.category, "status": e.category_status, "objection": e.objection_segment_ids,
-                             "context": e.context_segment_ids} for e in run.episodes],
-                  new_lead_ids=sorted(self._sid(s) for s in new_seqs), usage=t["classifier"], raw=run.raw_response)
+        fast = None
+        if self.config.fast_path:
+            with self.lock:
+                self.fast_path_counters["attempts"] += 1
+            if len(targets) == 1:  # one new lead line, read alone (a continuation or a batch -> the LLM)
+                fast = fast_path_category(next(s.text for s in call.segments if s.segment_id == targets[0]))
+        if fast:
+            # the fast path proposes a category; validation and every gate below still apply
+            t["classification_source"] = "deterministic_fast_path"
+            detection, raw_episodes, spans = "OBJECTIONS_FOUND", (EpisodePrediction(
+                prediction_id="fp1", objection_segment_ids=targets, context_segment_ids=(), category_status="PRESENT",
+                category=fast, category_candidates=(), reaction_status="ABSENT", reaction=None,
+                reaction_candidates=(), resolution_status="unknown", summary="Deterministic fast path."),), ()
+            with self.lock:
+                self.fast_path_counters["hits"] += 1
+                self.fast_path_counters["llm_calls_saved"] += 1
+                self.fast_path_by_category[fast] = self.fast_path_by_category.get(fast, 0) + 1
+            t.update(classifier_finished_at=self.clock(), classifier={}, episodes=1)
+            self._dbg("CLASSIFIER", source="deterministic_fast_path", category=fast, objection=list(targets))
+        else:
+            t["classification_source"] = "llm"
+            # structured: the classifier's own output schema, enforced by Ollama (see CLASSIFIER_SCHEMA)
+            run = classify_call(self._classifier_call(window, targets, call), self.config.arm, self.classifier,
+                                self.classification_kb, structured=True,
+                                target_segment_ids=targets)
+            detection, raw_episodes, spans = run.call_detection, run.episodes, run.uncertain_spans
+            t.update(classifier_finished_at=self.clock(), classifier=_usage(self.classifier),
+                     episodes=len(run.episodes))
+            self._dbg("CLASSIFIER", source="llm", detection=run.call_detection,
+                      validation_errors=list(run.validation_errors),
+                      episodes=[{"category": e.category, "status": e.category_status,
+                                 "objection": e.objection_segment_ids, "context": e.context_segment_ids}
+                                for e in run.episodes],
+                      new_lead_ids=sorted(self._sid(s) for s in new_seqs), usage=t["classifier"],
+                      raw=run.raw_response)
         # Live: the trigger is the newest utterance, so the model tends to cite the lines *before* it
         # as context, which the classifier contract forbids. Keep only post-anchor context (less
         # evidence, never more) and re-run the classifier's own validator; still invalid -> nothing.
         order = {seg.segment_id: seg.segment_index for seg in call.segments}
         episodes = tuple(dataclasses.replace(e, context_segment_ids=tuple(
             c for c in e.context_segment_ids if order.get(c, -1) > order.get(e.anchor_segment_id, -1)))
-            for e in run.episodes)
-        if errors := validate_predictions(call, run.call_detection, episodes, run.uncertain_spans):
+            for e in raw_episodes)
+        if errors := validate_predictions(call, detection, episodes, spans):
             self._dbg("CLASSIFIER", status="INVALID", errors=list(errors))
             return "NO_RECOMMENDATION", "CLASSIFIER_INVALID"
-        if run.call_detection != "OBJECTIONS_FOUND":
+        if detection != "OBJECTIONS_FOUND":
             return "NO_RECOMMENDATION", "NO_OBJECTION"
         allowed = _target_turns(call, new_ids)
         candidates = [e for e in episodes if self._qualifies(e, new_ids, allowed)]
@@ -679,6 +759,22 @@ class LiveSalesSession:
                 self.open_objections.append(episode.category)
             t["recommendation_id"] = t["_new_rec"].id
         return "RECOMMENDED", "GUIDED"
+
+    def _classifier_call(self, window: list[LiveUtterance], targets: tuple[str, ...], call: Call) -> Call:
+        """The classifier's input: the whole window, or only the turns right before the target lead turn."""
+        n = self.config.classifier_context_turns
+        if n <= 0:
+            return call
+        first = next(i for i, u in enumerate(window) if self._sid(u.sequence) in targets)
+        while first and window[first - 1].speaker == window[first].speaker:  # the target's whole lead turn
+            first -= 1
+        start, turns = first, 0
+        while start and turns < n:
+            turns += 1
+            speaker = window[start - 1].speaker
+            while start and window[start - 1].speaker == speaker:
+                start -= 1
+        return self._window_call(window[start:])
 
     @staticmethod
     def _qualifies(e: EpisodePrediction, new_ids: set[str], allowed: set[str]) -> bool:
