@@ -26,6 +26,12 @@ SCRIPT = {  # lead text -> category the fake classifier reports
     "Pera aí, travou tudo aqui.": None,  # noise: long enough to trigger, no objection
     "Preciso falar com o meu sócio antes": "TIMING_PRIORITY",  # real-Meet E1 mislabel (caption cut at "antes")
     "Agora não é um bom momento. Vamos falar mês que vem.": "TIMING_PRIORITY",
+    "Preciso validar com minha sócia.": "AUTHORITY_INTERNAL_BUY_IN",
+    "Mas o principal problema para mim ainda é o preço.": "PRICE_BUDGET",
+    "Agora não é o momento, talvez no próximo trimestre.": "TIMING_PRIORITY",
+    "Sinceramente não sei se a gente precisa disso.": "NEED_VALUE_FIT",
+    "Mas está acima do que eu consigo investir agora.": "PRICE_BUDGET",
+    "Sim, meu sócio.": "AUTHORITY_INTERNAL_BUY_IN",
 }
 ANSWERS = {
     "PRICE_BUDGET": ("PRICE_BUDGET.M2", "O lead disse que achou caro.", "Caro em relação a quê?"),
@@ -635,3 +641,131 @@ def test_rehydrate_endpoint_over_http(kb):
             assert json.loads(r.read())["instance"] == rt.instance
     finally:
         server.shutdown()
+
+
+# --- latest-utterance anchoring: the NEW lead line is the target, the window is context -------------
+
+def _episode(objection, category, context=()):
+    return {"prediction_id": f"p{objection[0]}", "objection_segment_ids": list(objection),
+            "context_segment_ids": list(context), "category_status": "PRESENT", "category": category,
+            "category_candidates": [], "reaction_status": "ABSENT", "reaction": None, "reaction_candidates": [],
+            "resolution_status": "unknown", "summary": "Objeção do lead."}
+
+
+class Scripted(FakeProvider):
+    """Classifier answers come from `answer(prompt)` (to play a misbehaving model); guidance as FakeProvider."""
+
+    def __init__(self, answer):
+        super().__init__()
+        self.answer = answer
+
+    def classify(self, prompt, **kw):
+        if prompt.startswith("GUIDANCE TASK"):
+            return super().classify(prompt, **kw)
+        self.prompts.append(prompt)
+        episodes = self.answer(prompt)
+        return {"call_detection": "OBJECTIONS_FOUND" if episodes else "NO_OBJECTION", "episodes": episodes,
+                "uncertain_spans": []}
+
+
+def _live(s, clock, lines):
+    """Feed (role, text) lines as a call, analyzing after each lead line; returns the last lead line's analysis."""
+    t = None
+    for seq, (role, text) in enumerate(lines, len(s.utterances) + 1):  # continues the session's numbering
+        clock.now += 8
+        _say(s, clock, seq, role, text)
+        if s.should_analyze():
+            t = s.analyze()
+    return t
+
+
+def test_the_prompt_targets_only_the_new_lead_line(kb):
+    s, provider, clock = _session(kb)
+    _live(s, clock, [("lead", "Gostei da proposta, mas achei muito caro."), ("closer", "Entendi."),
+                     ("lead", "Preciso falar com meu sócio antes de fechar.")])
+    first, second = [p for p in provider.prompts if not p.startswith("GUIDANCE TASK")]
+    assert "LIVE TARGET" in first and "The lead just said: seg_1." in first
+    assert "The lead just said: seg_3." in second  # the old objection is context, not a target
+    assert "Gostei da proposta" in second  # ...but still visible as context
+
+
+def test_price_then_authority_gives_authority_in_the_same_session(kb):
+    s, _, clock = _session(kb)
+    t1 = _live(s, clock, [("lead", "Gostei da proposta, mas achei muito caro.")])
+    assert (t1["category"], s.current().category) == ("PRICE_BUDGET", "PRICE_BUDGET")
+    t2 = _live(s, clock, [("lead", "Preciso falar com meu sócio antes de fechar.")])
+    assert (t2["category"], t2["outcome"]) == ("AUTHORITY_INTERNAL_BUY_IN", "RECOMMENDED")
+    assert s.current().category == "AUTHORITY_INTERNAL_BUY_IN"  # replaced the PRICE recommendation
+
+
+def test_authority_then_price_gives_price(kb):
+    s, _, clock = _session(kb)
+    t = _live(s, clock, [("lead", "Preciso validar com minha sócia."), ("closer", "Claro, faz sentido."),
+                         ("lead", "Mas o principal problema para mim ainda é o preço.")])
+    assert (t["category"], s.current().category) == ("PRICE_BUDGET", "PRICE_BUDGET")
+
+
+def test_timing_and_need_value_fit_still_classified(kb):
+    s, _, clock = _session(kb)
+    assert _live(s, clock, [("lead", "Hoje temos cinco pessoas no time."), ("closer", "E o momento de vocês?"),
+                            ("lead", "Agora não é o momento, talvez no próximo trimestre.")])["category"] == \
+        "TIMING_PRIORITY"
+    s, _, clock = _session(kb)
+    assert _live(s, clock, [("lead", "Gostei da proposta, mas achei muito caro."), ("closer", "Entendi."),
+                            ("lead", "Sinceramente não sei se a gente precisa disso.")])["category"] == \
+        "NEED_VALUE_FIT"
+
+
+def test_an_old_objection_never_satisfies_a_new_analysis(kb):
+    # the model re-annotates only the old PRICE line (the real-Meet failure): no new episode, nothing reused
+    old_only = Scripted(lambda prompt: [_episode(["seg_1"], "PRICE_BUDGET")])
+    s, _, clock = _session(kb, provider=old_only)
+    t = _live(s, clock, [("lead", "Está muito caro, de verdade."), ("closer", "Entendi."),
+                         ("lead", "Hoje temos cinco pessoas no time.")])
+    assert (t["outcome"], t["reason"]) == ("NO_RECOMMENDATION", "NO_QUALIFYING_EPISODE")
+
+
+def test_a_neutral_line_folded_into_an_old_objection_is_rejected(kb):
+    # the model "folds" the new neutral line into the old PRICE episode across the closer's turn
+    def folded(prompt):
+        ids = [i for i, role, _ in _SEG.findall(prompt) if role == "lead"]
+        return [_episode(ids, "PRICE_BUDGET")]
+
+    s, provider, clock = _session(kb, provider=Scripted(folded))
+    first = _live(s, clock, [("lead", "Está muito caro, de verdade.")])
+    assert first["category"] == "PRICE_BUDGET"
+    clock.now += 60  # past the cooldown, so a repeated PRICE would be shown again
+    t = _live(s, clock, [("closer", "Entendi."), ("lead", "Hoje temos cinco pessoas no time.")])
+    assert (t["outcome"], t["reason"]) == ("NO_RECOMMENDATION", "NO_QUALIFYING_EPISODE")
+    assert provider.guidance_calls() == 1  # no second PRICE guidance
+
+
+def test_a_continuation_in_the_same_lead_turn_is_kept(kb):
+    # "Eu gostei." is too short to be analyzed alone; the next line completes it in the same turn
+    cont = Scripted(lambda prompt: [_episode(["seg_1", "seg_2"], "PRICE_BUDGET")] if "seg_2" in prompt else [])
+    s, _, clock = _session(kb, provider=cont)
+    t = _live(s, clock, [("lead", "Eu gostei."), ("lead", "Mas está acima do que eu consigo investir agora.")])
+    assert (t["category"], t["outcome"]) == ("PRICE_BUDGET", "RECOMMENDED")
+
+
+def test_a_continuation_of_an_already_analyzed_line_in_the_same_turn_is_kept(kb):
+    two = Scripted(lambda prompt: [_episode(["seg_1", "seg_2"], "PRICE_BUDGET")] if "seg_2" in prompt else [])
+    s, _, clock = _session(kb, provider=two)
+    t = _live(s, clock, [("lead", "Eu gostei bastante do que vi aqui."),  # analyzed: no objection
+                         ("lead", "Mas está acima do que eu consigo investir agora.")])
+    assert (t["category"], t["outcome"]) == ("PRICE_BUDGET", "RECOMMENDED")
+
+
+def test_a_short_answer_to_a_context_question_is_interpretable(kb):
+    s, provider, clock = _session(kb)
+    t = _live(s, clock, [("closer", "Além de você, alguém participa da decisão?"), ("lead", "Sim, meu sócio.")])
+    assert (t["category"], t["outcome"]) == ("AUTHORITY_INTERNAL_BUY_IN", "RECOMMENDED")
+    prompt = next(p for p in provider.prompts if not p.startswith("GUIDANCE TASK"))
+    assert "Além de você, alguém participa da decisão?" in prompt and "The lead just said: seg_2." in prompt
+
+
+def test_neutral_lines_only_give_no_recommendation(kb):
+    s, _, clock = _session(kb)
+    t = _live(s, clock, [("lead", "Hoje temos cinco pessoas no time."), ("closer", "Legal."),
+                         ("lead", "A gente usa uma planilha compartilhada.")])
+    assert (t["outcome"], s.current()) == ("NO_RECOMMENDATION", None)

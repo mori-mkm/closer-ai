@@ -333,6 +333,26 @@ the older PRICE_BUDGET recommendation stayed ACTIVE. With an earlier objection i
 annotates the old line and not the new one (also 52.5 % of the analyses in the 30-min soak ended in
 NO_QUALIFYING_EPISODE). Precision work, tracked apart from reliability.
 
+**Fix (branch `feat/latest-utterance-anchoring`): the new lead utterance is the classification target,
+the older transcript is context.** Root cause: the classifier got the whole window with "annotate
+objections in one sales call" and no notion of which line was new, so an older, still "open" objection
+competed with (and often replaced) the new line; the policy then dropped it (`NO_QUALIFYING_EPISODE`) —
+or, if the model folded the new line into the old episode, could have repeated the old category.
+- **Input contract:** `classify_call(..., target_segment_ids=...)` adds a short `LIVE TARGET` block:
+  the lead lines new since the last analysis (the trigger, plus any superseded while waiting) are what
+  is analyzed; earlier segments are context for references, short answers and continuations; every
+  episode must include a target; pains, facts, current process or agreement are NO_OBJECTION unless
+  stated as a reason not to move forward. Eval / post-call prompts are unchanged.
+- **Deterministic rule (policy):** an episode qualifies only if it includes a new lead segment and
+  every objection segment lies in the same uninterrupted lead turn as one (a continuation). An
+  objection from an earlier turn — alone or folded with the new line — never satisfies the current
+  analysis.
+- Measured (`python -m closer_ai.live.bench --sequences`, 12 live sequences): 9/12 → 12/12 correct
+  (0 false positives, 0 wrong categories; false negatives 3 → 0); isolated-line probe unchanged
+  (7/8, 0 false). A first wording of the block made "A gente perde bastante tempo com isso." a TIMING
+  false positive (3/3); the "pains/facts are NO_OBJECTION" line fixed it (back to the gated
+  IMPLEMENTATION, as before).
+
 ### Long-call soak
 
 `python -m closer_ai.live.soak --minutes 30` (real runtime over HTTP + real Ollama, invented lines,
