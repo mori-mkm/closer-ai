@@ -17,6 +17,28 @@ const ROLE_LABEL = { lead: "Lead", closer: "Closer", unknown: "?" };
 const PANELS = ["suggestion", "history", "advanced"];
 const TOAST_MS = 4000;
 const HISTORY_LINES = 8;
+// Commercial State sections, in display order (runtime field -> label). Advanced panel only.
+const COMMERCIAL_SECTIONS = [
+  ["pain_points", "Pain"], ["impacts", "Impact"], ["stakeholders", "Stakeholders"],
+  ["decision_process", "Decision process"], ["buying_signals", "Buying signals"], ["objections", "Objections"],
+  ["commercial_terms", "Commercial terms"], ["next_steps", "Next steps"],
+];
+
+/** Compact, evidence-cited lines of the runtime's commercial_state (null when the runtime has none). */
+function commercialLines(state) {
+  if (!state) return null;
+  const lines = ["COMMERCIAL STATE"];
+  for (const [key, label] of COMMERCIAL_SECTIONS) {
+    const facts = state[key] || [];
+    lines.push(label);
+    if (!facts.length) lines.push("- -");
+    for (const f of facts) {
+      const role = f.role && f.role !== "mentioned" ? ` (${f.role})` : "";
+      lines.push(`- ${f.value}${role} [${(f.segment_ids || []).join(", ")}]`);
+    }
+  }
+  return lines;
+}
 
 /**
  * data: the runtime answer (or null when it is unreachable).
@@ -63,6 +85,7 @@ function dockView(data, ctx) {
     `Status: ${status}`,
   ];
   if (warning) basic.push(`Atenção: ${warning.text}`);
+  const commercial = commercialLines(d.commercial_state);
   let technical = null;
   if (debug) {
     const c = ctx.counters;
@@ -87,6 +110,7 @@ function dockView(data, ctx) {
       `analyses_started: ${rc.analyses_started ?? "-"} · analyses_completed: ${rc.analyses_completed ?? "-"} · analysis_errors: ${rc.analysis_errors ?? "-"}`,
       `recommendations_created: ${rc.recommendations_created ?? "-"} · model_state: ${d.debug.model_state || "-"}`,
       `analysis_error_reasons: ${kv(d.debug.analysis_error_reasons || {})}`,
+      `commercial: ${kv(d.debug.commercial_counters || {})}`,
     ];
     if (a) technical.push(`active_segment: ${a.segment_id}${a.detected_category ? ` · ${a.detected_category}` : ""}`);
     if (rec) {
@@ -105,7 +129,7 @@ function dockView(data, ctx) {
     technical.push("", `meeting_id: ${ctx.meetingId}`);
   }
 
-  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, technical } };
+  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, commercial, technical } };
 }
 
 const DOCK_INITIAL = Object.freeze({ open: null, seenRecId: null, notifiedRecId: null, toastUntil: 0 });
@@ -152,5 +176,5 @@ function dockChrome(state, view, now) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { dockView, dockReducer, dockChrome, DOCK_INITIAL, TONES, TOAST_MS };
+  module.exports = { dockView, dockReducer, dockChrome, commercialLines, DOCK_INITIAL, TONES, TOAST_MS };
 }

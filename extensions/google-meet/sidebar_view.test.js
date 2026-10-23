@@ -176,3 +176,21 @@ test("runtime online but model unavailable is its own gray state", () => {
   const v = dockView({ state: "NONE", status: "CAPTURING" }, { ...ctx, health: { model_state: "unavailable" } });
   assert.deepStrictEqual([v.tone, v.status], ["idle", "Modelo indisponível"]);
 });
+
+test("commercial state is shown only in the advanced panel, with its evidence", () => {
+  const commercial_state = {
+    pain_points: [{ value: "tudo manual", segment_ids: ["seg_1", "seg_2"], status: "OBSERVED" }],
+    impacts: [], decision_process: [], buying_signals: [], commercial_terms: [], next_steps: [],
+    stakeholders: [{ value: "sócio", segment_ids: ["seg_4", "seg_5"], status: "OBSERVED", role: "decision_participant" }],
+    objections: [{ value: "PRICE_BUDGET", segment_ids: ["seg_6"], status: "CONFIRMED" }],
+  };
+  const v = dockView({ ...ready, commercial_state }, ctx); // runtime without --debug: still in Avançado
+  const c = v.advanced.commercial;
+  assert.strictEqual(c[0], "COMMERCIAL STATE");
+  for (const line of ["- tudo manual [seg_1, seg_2]", "- sócio (decision_participant) [seg_4, seg_5]",
+    "- PRICE_BUDGET [seg_6]", "Next steps"]) assert.ok(c.includes(line), line);
+  assert.strictEqual(c[c.indexOf("Impact") + 1], "- -");
+  const visible = JSON.stringify([v.status, v.rec, v.analyzing, v.detected, v.history, v.advanced.basic]);
+  assert.ok(!visible.includes("sócio") && !visible.includes("tudo manual")); // main UX untouched
+  assert.strictEqual(dockView(ready, ctx).advanced.commercial, null); // older runtime: nothing shown
+});
