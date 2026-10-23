@@ -248,6 +248,22 @@ def test_an_old_fact_cannot_be_extracted_again_from_context():
     assert accepted == [] and [r["reason"] for r in rejected] == ["NOT_IN_TARGET"]
 
 
+def test_an_earlier_line_of_the_same_lead_turn_is_not_re_cited():
+    # real qwen3 run: reading "Fazemos tudo manualmente." it re-emitted the stakeholder of the line before
+    lines = [("closer", "Além de você, alguém participa da decisão?"), ("lead", "Sim, meu sócio."),
+             ("lead", "Fazemos tudo manualmente.")]
+    state = CommercialState()
+    accepted, _ = _parse(lines, [_ev("STAKEHOLDER_IDENTIFIED", "sócio", ["seg_2"], "decision_participant")],
+                         state=state)
+    state.apply(accepted[0])
+    accepted, rejected = _parse(lines, [_ev("STAKEHOLDER_IDENTIFIED", "meu sócio", ["seg_2", "seg_3"],
+                                            "decision_participant"),
+                                        _ev("PAIN_IDENTIFIED", "tudo manualmente", ["seg_3"])],
+                                targets=("seg_3",), state=state)
+    assert [r["reason"] for r in rejected] == ["NOT_IN_TARGET"]
+    assert [e.value for e in accepted] == ["tudo manualmente"]
+
+
 def test_every_fact_in_the_state_has_segment_ids(kb):
     s, _, clock = _session(kb)
     view = _run(s, clock, MANUAL_SEQUENCE)

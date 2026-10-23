@@ -32,7 +32,13 @@ SCRIPT = {  # lead text -> category the fake classifier reports
     "Agora não é o momento, talvez no próximo trimestre.": "TIMING_PRIORITY",
     "Sinceramente não sei se a gente precisa disso.": "NEED_VALUE_FIT",
     "Mas está acima do que eu consigo investir agora.": "PRICE_BUDGET",
-    "Sim, meu sócio.": "AUTHORITY_INTERNAL_BUY_IN",
+    "Sim, meu sócio.": "AUTHORITY_INTERNAL_BUY_IN",  # qwen3 E1 mislabel of a discovery answer (6/6)
+    "Eu e meu diretor.": "AUTHORITY_INTERNAL_BUY_IN",
+    "Sou eu e a minha sócia.": "AUTHORITY_INTERNAL_BUY_IN",
+    "Eu gostei, mas não posso decidir isso sozinho.": "AUTHORITY_INTERNAL_BUY_IN",
+    "Meu diretor precisa aprovar antes da gente seguir.": "AUTHORITY_INTERNAL_BUY_IN",
+    "Só consigo avançar depois da aprovação do meu sócio.": "AUTHORITY_INTERNAL_BUY_IN",
+    "Preciso falar com um sócio antes de fechar.": "AUTHORITY_INTERNAL_BUY_IN",
 }
 ANSWERS = {
     "PRICE_BUDGET": ("PRICE_BUDGET.M2", "O lead disse que achou caro.", "Caro em relação a quê?"),
@@ -765,9 +771,47 @@ def test_a_continuation_of_an_already_analyzed_line_in_the_same_turn_is_kept(kb)
 def test_a_short_answer_to_a_context_question_is_interpretable(kb):
     s, provider, clock = _session(kb)
     t = _live(s, clock, [("closer", "Além de você, alguém participa da decisão?"), ("lead", "Sim, meu sócio.")])
-    assert (t["category"], t["outcome"]) == ("AUTHORITY_INTERNAL_BUY_IN", "RECOMMENDED")
+    # the answer is the target, the question its context; naming a stakeholder is not an objection
+    assert (t["outcome"], t["reason"]) == ("NO_RECOMMENDATION", "UNCORROBORATED_CATEGORY")
     prompt = next(p for p in provider.prompts if not p.startswith("GUIDANCE TASK"))
     assert "Além de você, alguém participa da decisão?" in prompt and "The lead just said: seg_2." in prompt
+
+
+@pytest.mark.parametrize("question,answer", [
+    ("Quem participa da decisão?", "Meu sócio."),  # too short to be analyzed at all
+    ("Além de você, alguém participa da decisão?", "Sim, meu sócio."),
+    ("Além de você, alguém precisa aprovar?", "Sim, meu sócio."),
+    ("Quem precisa olhar essa proposta?", "Eu e meu diretor."),
+    ("E quem decide a compra aí?", "Sou eu e a minha sócia."),
+])
+def test_stakeholder_discovery_answers_are_not_authority_objections(kb, question, answer):
+    s, provider, clock = _session(kb)  # the fake classifier labels these AUTHORITY, like qwen3 E1 does
+    _live(s, clock, [("closer", question), ("lead", answer)])
+    assert s.current() is None and s.counters["recommendations_created"] == 0
+    assert s.commercial.view()["objections"] == [] and provider.guidance_calls() == 0
+
+
+@pytest.mark.parametrize("line", [
+    "Preciso falar com meu sócio antes de fechar.",
+    "Preciso falar com um sócio antes de fechar.",  # the real-Meet line
+    "Eu gostei, mas não posso decidir isso sozinho.",
+    "Meu diretor precisa aprovar antes da gente seguir.",
+    "Só consigo avançar depois da aprovação do meu sócio.",
+])
+def test_blocking_authority_objections_are_still_recommended(kb, line):
+    s, _, clock = _session(kb)
+    t = _live(s, clock, [("closer", "Faz sentido para vocês?"), ("lead", line)])
+    # the gate lets it through (the fake's canned guidance mentions "sócio", so grounding may still
+    # reject it for lines without one: that is guidance, not the authority decision)
+    assert t["category"] == "AUTHORITY_INTERNAL_BUY_IN" and t["reason"] != "UNCORROBORATED_CATEGORY"
+    assert t["reason"] in ("GUIDED", "GUIDANCE_INVALID_RESPONSE")
+    assert [f["value"] for f in s.commercial.view()["objections"]] == ["AUTHORITY_INTERNAL_BUY_IN"]
+
+
+def test_the_cut_real_meet_authority_line_still_passes_override_and_gate(kb):
+    s, _, clock = _session(kb)  # E1 said TIMING; authority_override -> AUTHORITY; the gate keeps it
+    t = _live(s, clock, [("lead", "Preciso falar com o meu sócio antes")])
+    assert (t["category"], t["outcome"]) == ("AUTHORITY_INTERNAL_BUY_IN", "RECOMMENDED")
 
 
 def test_neutral_lines_only_give_no_recommendation(kb):

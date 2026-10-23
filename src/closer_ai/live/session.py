@@ -49,6 +49,7 @@ from closer_ai.live.commercial_state import (
     objection_event,
     parse_facts,
 )
+from closer_ai.live.post_call_brief import PostCallBrief, build_brief
 from closer_ai.normalization.models import Call, Participant, TranscriptSegment
 
 LABELS = {  # short pt-BR label for the panel; the category itself is always shown too
@@ -95,11 +96,11 @@ def _first_sentence(text: str) -> str:
 # lead's own words must mention putting the solution in place. Without it ("a gente perde tempo com
 # isso" = pain, not resistance) the episode is not shown.
 # ponytail: stem list, misses paraphrases (recall ceiling); replace with a measured precision fix.
-CORROBORATION: dict[str, tuple[str, ...]] = {
-    "IMPLEMENTATION_INTEGRATION": ("implant", "implement", "integr", "instal", "configur", "migr", "treina",
-                                   "aplicar", "tocar isso", "gente pra", "equipe pra", "equipe nao",
-                                   "formato", "presencial", "adapt"),
-}
+CORROBORATION: dict[str, re.Pattern[str]] = {  # matched on the accent-folded objection words
+    "IMPLEMENTATION_INTEGRATION": re.compile("|".join(map(re.escape, (
+        "implant", "implement", "integr", "instal", "configur", "migr", "treina", "aplicar", "tocar isso",
+        "gente pra", "equipe pra", "equipe nao", "formato", "presencial", "adapt")))),
+}  # + AUTHORITY_INTERNAL_BUY_IN, below
 
 
 # Live category normalization (real Meet, Oct 2026): after noise and a pain line, E1 labeled "Gostei da
@@ -154,6 +155,28 @@ def authority_override(category: str | None, objection_text: str) -> str | None:
     if category == "TIMING_PRIORITY" and _AUTHORITY_DEPENDENCY.search(text) and not _TIME_MARKER.search(text):
         return "AUTHORITY_INTERNAL_BUY_IN"
     return category
+
+
+# Emission gate for AUTHORITY_INTERNAL_BUY_IN (real Meet + qwen3 matrix, Oct 2026): E1 labels a short answer
+# to a discovery question ("Quem participa da decisão?" -> "Sim, meu sócio.") AUTHORITY 6/6. Naming a
+# stakeholder is a fact for the Commercial State, not an objection. An authority objection needs the lead's
+# own words to state a dependency that blocks moving forward: an obligation to consult/get approval
+# ("preciso falar com", "precisa aprovar"), not being able to decide alone ("não posso decidir"), or moving
+# only after someone's approval ("depois da aprovação"). Same mechanism as the IMPLEMENTATION gate.
+# ponytail: phrase patterns, high precision by design; paraphrases without these verbs are not shown.
+_AUTHORITY_BLOCKING = re.compile(
+    r"\b(?:"
+    r"(?:precis\w*|tenho que|temos que|tem que|teria que|teriamos que|ter que|vou|vamos|deixa eu)"
+    r" (?:de )?(?:falar|conversar|consultar|validar|alinhar|checar|confirmar|discutir|ver|levar|passar|mostrar"
+    r"|apresentar|aprovar|autorizar|liberar|assinar|dar o (?:ok|aval)|pedir)\b"
+    r"|(?:nao|nem) (?:posso|podemos|consigo|conseguimos|da pra|tenho como|temos como|decido|fecho|assino)"
+    r"(?: \w+)? (?:decidir|fechar|assinar|aprovar|avancar|seguir|bater o martelo|sozinh\w*)"
+    r"|(?:decid\w*|fech\w*|assin\w*|resolv\w*) (?:\w+ )?sozinh\w*"
+    r"|(?:depois|antes) d[aeo]s? (?:aprovacao|autorizacao|aval|ok|validacao|liberacao|sinal verde)"
+    r"|(?:depende|dependo|dependemos|dependem) (?:do|da|dos|das|de)"
+    r"|(?:aprovacao|autorizacao|aval|ok) (?:do|da|dos|das) "
+    r")")
+CORROBORATION["AUTHORITY_INTERNAL_BUY_IN"] = _AUTHORITY_BLOCKING
 
 
 @dataclass(frozen=True)
@@ -310,6 +333,8 @@ class LiveSalesSession:
     commercial: CommercialState = field(default_factory=CommercialState)
     _last_extracted_seq: int = -1
     _rehydrated_upto: int = -1  # extractions of lines up to here rebuild the state after a restart
+    _facts_in_flight: int = 0  # extractions claimed but not applied yet (finalize waits for them)
+    brief: PostCallBrief | None = None  # set once by finalize(); the same brief is returned after that
     _analysis_done_at: float = 0.0  # the last objection analysis finished (the closer usually answers now)
     fact_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
         "extractions", "rebuild_extractions", "extraction_errors", "events_accepted", "events_rejected",
@@ -600,7 +625,7 @@ class LiveSalesSession:
         cues = CORROBORATION.get(episode.category)
         if cues:
             said = " ".join(_fold(seg.text) for seg in call.segments if seg.segment_id in episode.objection_segment_ids)
-            if not any(c in said for c in cues):
+            if not cues.search(said):
                 t["category"] = episode.category
                 return "NO_RECOMMENDATION", "UNCORROBORATED_CATEGORY"
         t["category"] = episode.category
@@ -710,11 +735,14 @@ class LiveSalesSession:
                                     first + self.config.facts_chunk_utterances]
             new = [u for u in chunk if u in todo]
             self._last_extracted_seq = new[-1].sequence
+            self._facts_in_flight += 1
             rebuild = new[-1].sequence <= self._rehydrated_upto
             call = self._window_call(chunk)
         targets = tuple(self._sid(u.sequence) for u in new if len(u.text.split()) >= 2)
         t: dict[str, Any] = {"kind": "commercial_facts", "rebuild": rebuild, "target_segment_ids": list(targets)}
         if not targets:
+            with self.lock:
+                self._facts_in_flight -= 1
             return {**t, "outcome": "SKIPPED_SHORT"}
         started = self.clock()
         try:
@@ -732,9 +760,32 @@ class LiveSalesSession:
         t["latency_ms"] = _ms(self.clock() - started)
         t.update(usage=_usage(self.provider))
         with self.lock:
+            self._facts_in_flight -= 1
             self.fact_counters["rebuild_extractions" if rebuild else "extractions"] += 1
             self.fact_counters["extraction_errors"] += t["outcome"] == "ERROR"
             self.fact_counters["events_accepted"] += len(events)
             self.fact_counters["events_rejected"] += len(rejected)
         self._dbg("COMMERCIAL", **{k: v for k, v in t.items() if k != "usage"})
         return t
+
+    # --- post-call brief ----------------------------------------------------------------------------
+
+    def busy(self) -> bool:
+        """An objection analysis is waiting/running or an extraction is in flight."""
+        with self.lock:
+            return bool(self.active_analysis or self.pending_lead_seq is not None or self._facts_in_flight)
+
+    def finalize(self) -> PostCallBrief:
+        """End of call: read the lead lines not read yet (no pause wait), then build the brief from the
+        CommercialState. Idempotent: the first brief is kept and returned again; nothing is re-analyzed.
+        Callers wait for `busy()` to clear first (Runtime.finalize)."""
+        with self.lock:
+            if self.brief is not None:
+                return self.brief
+        while self.should_extract():
+            self.extract()
+        with self.lock:
+            if self.brief is None:
+                self.brief = build_brief(self.meeting_id, self.commercial.view(), list(self.timings),
+                                         dict(self.counters), self.clock(), rebuilt=self._rehydrated_upto >= 0)
+            return self.brief

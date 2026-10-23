@@ -5,6 +5,7 @@
     python -m closer_ai.live.bench --precision      # 14 probe lines once each: shown right / false shown
     python -m closer_ai.live.bench --sequences      # live sequences: is the NEW lead line the target?
     python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented, extraction latency
+    python -m closer_ai.live.bench --authority      # stakeholder discovery answers vs authority blocking objections
 
 Each run is a fresh meeting: one closer line, then the case's lead line. The lead line goes through
 `Runtime.receive` (background worker, as from the extension), and a poller calls
@@ -80,7 +81,7 @@ SEQUENCES: list[tuple[str, list[tuple[str, str]], Any]] = [
     ("continuation, same turn", [("lead", "Eu gostei."),
                                  ("lead", "Mas está acima do que eu consigo investir agora.")], "PRICE_BUDGET"),
     ("context question -> short answer", [("closer", "Além de você, alguém participa da decisão?"),
-                                          ("lead", "Sim, meu sócio.")], {None, "AUTHORITY_INTERNAL_BUY_IN"}),
+                                          ("lead", "Sim, meu sócio.")], None),  # stakeholder fact, not an objection
     ("neutral only", [("lead", "Hoje temos cinco pessoas no time."), ("closer", "Legal."),
                       ("lead", "A gente usa uma planilha compartilhada.")], None),
 ]
@@ -117,6 +118,29 @@ COMMERCIAL = [
                          ("lead", "Gostei, mas achei caro."), ("lead", "Se a gente resolver isso, quero começar este mês.")],
      {"pain_points": ["manual"], "impacts": ["tempo"], "stakeholders": ["socio"], "buying_signals": ["comecar"],
       "objections": ["PRICE_BUDGET"]}),
+]
+
+
+# (name, closer question or None, lead line, expected category or None): invented lines
+AUTHORITY_MATRIX = [
+    ("discovery: quem participa / meu sócio", "Quem participa da decisão?", "Meu sócio.", None),
+    ("discovery: além de você / sim, meu sócio", "Além de você, alguém participa da decisão?", "Sim, meu sócio.", None),
+    ("discovery: quem precisa olhar / eu e meu diretor", "Quem precisa olhar essa proposta?", "Eu e meu diretor.", None),
+    ("discovery: precisa aprovar? / sim, meu sócio", "Além de você, alguém precisa aprovar?", "Sim, meu sócio.", None),
+    ("discovery: quem decide / eu e minha sócia", "E quem decide a compra aí?", "Sou eu e a minha sócia.", None),
+    ("discovery: alguém mais / o financeiro também", "Mais alguém participa?", "O financeiro também participa.", None),
+    ("blocking: falar com meu sócio antes de fechar", None, "Preciso falar com meu sócio antes de fechar.",
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("blocking: falar com um sócio antes de fechar (Meet)", None, "Preciso falar com um sócio antes de fechar.",
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("blocking: não posso decidir sozinho", None, "Eu gostei, mas não posso decidir isso sozinho.",
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("blocking: diretor precisa aprovar antes", None, "Meu diretor precisa aprovar antes da gente seguir.",
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("blocking: só avanço depois da aprovação", None, "Só consigo avançar depois da aprovação do meu sócio.",
+     "AUTHORITY_INTERNAL_BUY_IN"),
+    ("blocking: falar com o meu sócio antes (cut)", None, "Preciso falar com o meu sócio antes",
+     "AUTHORITY_INTERNAL_BUY_IN"),
 ]
 
 
@@ -197,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--sequences", action="store_true", help="run the live SEQUENCES (latest-utterance anchoring)")
     p.add_argument("--commercial", action="store_true", help="run the COMMERCIAL cases (Commercial State v0)")
     p.add_argument("--no-commercial", action="store_true", help="disable commercial facts extraction (A/B)")
+    p.add_argument("--authority", action="store_true", help="run the AUTHORITY_MATRIX (discovery vs blocking)")
+    p.add_argument("--repeat", type=int, default=1, help="--authority: runs per case")
     p.add_argument("--model", default="qwen3:8b")
     p.add_argument("--num-ctx", type=int, default=4096)
     p.add_argument("--reserve-tokens", type=int, default=1024)
@@ -210,6 +236,34 @@ def main(argv: list[str] | None = None) -> int:
     ollama.classify('Return {"ok": true} as JSON.')  # warm-up: load the model; reported, not measured
     print(json.dumps({"warmup_ms": round((time.time() - t0) * 1000),
                       "load_ms": round(ollama.last_usage.get("load_duration", 0) / 1e6)}), flush=True)
+
+    if a.authority:
+        rows = []
+        for i, (name, question, line, expected) in enumerate(AUTHORITY_MATRIX):
+            for r in range(a.repeat):
+                mid, base = f"auth-{i}-{r}", time.time() - 60
+                lines = ([("closer", question)] if question else [("closer", "Me conta, o que você achou?")]) + [
+                    ("lead", line)]
+                for seq, (role, text) in enumerate(lines, 1):
+                    runtime.receive(parse_utterance({"meeting_id": mid, "speaker": "Closer Teste" if role == "closer"
+                                                     else "Lead Teste", "text": text, "timestamp": base + seq * 8,
+                                                     "sequence": seq}, runtime.closer_names, base + seq * 8),
+                                    background=False)
+                s = runtime.sessions[mid]
+                t = s.timings[-1] if s.timings else {"outcome": "NOT_ANALYZED", "reason": s.last_trigger_reason}
+                shown = t.get("category") if t["outcome"] in ("RECOMMENDED", "KEPT") else None
+                rows.append({"case": name, "expected": expected, "shown": shown, "classifier": t.get("category"),
+                             "reason": t["reason"],
+                             "objections_in_state": [f["value"] for f in s.commercial.view()["objections"]],
+                             "ok": shown == expected and bool(expected or not s.commercial.view()["objections"])})
+                print(json.dumps(rows[-1], ensure_ascii=False), flush=True)
+        disc = [r for r in rows if r["expected"] is None]
+        block = [r for r in rows if r["expected"]]
+        print(json.dumps({"authority": {
+            "discovery_false_positives": f"{sum(not r['ok'] for r in disc)}/{len(disc)}",
+            "blocking_shown": f"{sum(r['ok'] for r in block)}/{len(block)}",
+        }}, indent=1), flush=True)
+        return 0
 
     if a.commercial:
         facts_runs: list[dict] = []

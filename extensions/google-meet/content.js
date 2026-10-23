@@ -85,7 +85,9 @@
     </div>
     <div class="panel" id="p-advanced" hidden>
       <div class="ph"><span class="pt">Avançado</span><button class="x" data-close title="Minimizar">–</button></div>
-      <div class="pb" style="max-height:320px"><pre class="mono" id="adv"></pre></div>
+      <div class="pb" style="max-height:320px"><button class="btn" id="b-finalize"
+        title="Gera o Post-call Brief a partir do estado comercial da call">Finalizar call · brief</button>
+        <pre class="mono" id="adv"></pre></div>
     </div>
     <div class="toast" id="toast" hidden>Nova sugestão</div>
     <div class="dock">
@@ -121,6 +123,14 @@
     $(`b-${p}`).onclick = () => dispatch({ type: "toggle", panel: p, recId: view && view.rec ? view.rec.id : null });
   }
   for (const b of root.querySelectorAll("[data-close]")) b.onclick = () => dispatch({ type: "close" });
+  // Post-call Brief: explicit end of call (POST /finalize, idempotent); the brief then shows in this panel.
+  $("b-finalize").onclick = () => {
+    $("b-finalize").textContent = "Gerando brief…";
+    send({ type: "finalize", body: { meeting_id: meetingId } }).then((r) => {
+      $("b-finalize").textContent = r.ok ? "Brief gerado" : `Brief: erro (${r.error}${r.status ? ` ${r.status}` : ""})`;
+      poll();
+    });
+  };
 
   function liveLine(color, text) {
     const row = el("div", "live");
@@ -194,7 +204,7 @@
     if (ui.open === "history") renderHistory(view.history); else shownHistory = "";
     if (ui.open === "advanced") {
       const a = view.advanced;
-      $("adv").textContent = [...a.basic, ...(a.commercial ? ["", ...a.commercial] : []), ...(a.technical ? ["", ...a.technical]
+      $("adv").textContent = [...(a.brief ? [...a.brief, ""] : []), ...a.basic, ...(a.commercial ? ["", ...a.commercial] : []), ...(a.technical ? ["", ...a.technical]
         : ["", "Detalhes técnicos: inicie o runtime com --debug."])].join("\n");
     }
   }

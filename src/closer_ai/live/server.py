@@ -11,6 +11,8 @@ Endpoints (the Chrome extension's background worker is the only intended client)
 - POST /dismiss         {"meeting_id"}
 - POST /rehydrate       {"meeting_id", "utterances": [...]} -> {"rehydrated", "utterances"}: after a runtime
                         restart the extension sends back what this meeting already had (context only)
+- POST /finalize        {"meeting_id"} -> {"brief": {...}, "markdown": "..."}: end of call, the Post-call
+                        Brief built from the meeting's CommercialState; idempotent (the same brief again)
 - GET  /health          -> {"status", "runtime", "model", "model_state", "instance"} (no call data)
 
 Every request needs the header `X-AI-Closer: 1` and POST bodies `Content-Type: application/json`;
@@ -38,6 +40,7 @@ from urllib.parse import parse_qs, urlsplit
 from closer_ai.ai.objection_guidance import load_objection_knowledge
 from closer_ai.ai.ollama_provider import OllamaClassificationProvider, OllamaError
 from closer_ai.demo.analyze_call import CLASSIFICATION_KB, GUIDANCE_KB, ContextGuard
+from closer_ai.live.post_call_brief import render_markdown
 from closer_ai.live.session import LiveConfig, LiveSalesSession, LiveUtterance
 
 DEFAULT_PORT = 8765
@@ -162,6 +165,21 @@ class Runtime:
             self._kick(s)  # rebuild the commercial state in the background: extraction only, no analysis
         return {"rehydrated": added, "utterances": len(s.utterances), "instance": self.instance}
 
+    def finalize(self, meeting_id: str, wait_seconds: float = 60.0) -> dict[str, Any] | None:
+        """End of call -> Post-call Brief (None: unknown meeting). Waits for the analysis/extraction in
+        progress so the last lead lines are in the state; raises TimeoutError if it does not finish."""
+        s = self.sessions.get(meeting_id)
+        if s is None:
+            return None
+        deadline = time.time() + wait_seconds
+        while s.brief is None and s.busy():
+            if time.time() > deadline:
+                raise TimeoutError("analysis still running; finalize again in a few seconds")
+            time.sleep(0.1)
+        brief = s.finalize()
+        self.dbg("BRIEF", meeting_id=meeting_id, risks=[r.code for r in brief.risks], facts=sum(map(len, brief.facts.values())))
+        return {"brief": brief.to_json(), "markdown": render_markdown(brief)}
+
     def _kick(self, s: LiveSalesSession) -> None:
         with self._lock:
             if s.meeting_id in self._busy:
@@ -230,6 +248,8 @@ class Runtime:
             view["transcript"] = [{"role": u.role, "text": u.text, **({"speaker": u.speaker} if self.debug else {})}
                                   for u in s.transcript()]
             view["commercial_state"] = s.commercial.view()  # shown only in the dock's advanced panel
+            if s.brief is not None:  # after POST /finalize (advanced panel only)
+                view["post_call_brief"] = {"markdown": render_markdown(s.brief), "finalized_at": s.brief.finalized_at}
         if self.debug:
             if self._last_poll.get(meeting_id) != view["state"]:  # log changes only (polled every 0.5 s)
                 self._last_poll[meeting_id] = view["state"]
@@ -302,6 +322,12 @@ def make_handler(runtime: Runtime) -> type[BaseHTTPRequestHandler]:
                     if not isinstance(meeting_id, str) or not meeting_id:
                         raise ValueError("meeting_id must be a non-empty string")
                     return self._send(200, runtime.rehydrate(meeting_id, payload.get("utterances")))
+                if self.path == "/finalize":
+                    try:
+                        out = runtime.finalize(str(payload.get("meeting_id", "")))
+                    except TimeoutError as exc:
+                        return self._send(503, {"error": str(exc)})
+                    return self._send(200, out) if out else self._send(404, {"error": "unknown meeting"})
                 if self.path == "/dismiss":
                     runtime.session(str(payload.get("meeting_id", ""))).dismiss()
                     return self._send(200, {"ok": True})

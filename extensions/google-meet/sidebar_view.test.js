@@ -194,3 +194,11 @@ test("commercial state is shown only in the advanced panel, with its evidence", 
   assert.ok(!visible.includes("sócio") && !visible.includes("tudo manual")); // main UX untouched
   assert.strictEqual(dockView(ready, ctx).advanced.commercial, null); // older runtime: nothing shown
 });
+
+test("post-call brief appears in the advanced panel only after finalize", () => {
+  assert.strictEqual(dockView(ready, ctx).advanced.brief, null);
+  const v = dockView({ ...ready, post_call_brief: { markdown: "# Post-call Brief\n\n## Summary\nNenhum fato.\n" } }, ctx);
+  assert.deepStrictEqual(v.advanced.brief, ["# Post-call Brief", "", "## Summary", "Nenhum fato."]);
+  const visible = JSON.stringify([v.status, v.rec, v.analyzing, v.detected, v.history, v.advanced.basic]);
+  assert.ok(!visible.includes("Post-call")); // main UX untouched
+});
