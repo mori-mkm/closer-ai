@@ -86,6 +86,7 @@ function dockView(data, ctx) {
   ];
   if (warning) basic.push(`Atenção: ${warning.text}`);
   const commercial = commercialLines(d.commercial_state);
+  const brief = d.post_call_brief ? d.post_call_brief.markdown.trimEnd().split("\n") : null; // after finalize
   let technical = null;
   if (debug) {
     const c = ctx.counters;
@@ -129,7 +130,7 @@ function dockView(data, ctx) {
     technical.push("", `meeting_id: ${ctx.meetingId}`);
   }
 
-  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, commercial, technical } };
+  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, commercial, brief, technical } };
 }
 
 const DOCK_INITIAL = Object.freeze({ open: null, seenRecId: null, notifiedRecId: null, toastUntil: 0 });

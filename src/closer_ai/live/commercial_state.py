@@ -13,9 +13,10 @@ Fail-closed grounding (`parse_facts`), deterministic: a fact is kept only if
 2. it cites segments of this call, including a target (new lead) segment;
 3. its value is the lead's own words: an exact (accent/case/punctuation-folded) span of the cited
    segments, so nothing can be paraphrased into existence ("sócio" never becomes "CFO");
-4. that span is in the target lead turn or the turn right before it (the question it answers): an
-   old fact cannot be re-extracted as new from context. The one exception is an update of a fact
-   already in the state (a stakeholder's role, "Ele é quem dá a palavra final.").
+4. that span is in a target (new) lead line or in the other speaker's turn right before it (the
+   question it answers): an old fact, even from the lead's same turn, cannot be re-extracted as new.
+   The one exception is an update of a fact already in the state (a stakeholder's role, "Ele é quem
+   dá a palavra final.").
 A COMMERCIAL_TERM must name an amount, plan, payment, contract or discount; a DECISION_PROCESS must
 name how the decision is made (decide, approve, validate, consult or talk to someone, a step). A stakeholder role beyond
 "mentioned" also needs a decision cue in that same scope; otherwise it is
@@ -242,7 +243,9 @@ def _has(text: str, words: str) -> bool:
 
 
 def _turn_scope(call: Call, targets: set[str]) -> set[str]:
-    """Target lead turn(s) + the turn right before the first one (the question being answered)."""
+    """The target segments + the other speaker's turn right before each target turn (the question
+    being answered). Earlier lines of the lead's own turn are not in scope: "Sim, meu sócio." followed by
+    "Fazemos tudo manualmente." must not re-cite the stakeholder as said again."""
     turns: list[list[str]] = []
     last_speaker = None
     for seg in sorted(call.segments, key=lambda s: s.segment_index):
@@ -254,7 +257,7 @@ def _turn_scope(call: Call, targets: set[str]) -> set[str]:
     hit = [i for i, t in enumerate(turns) if targets & set(t)]
     if not hit:
         return set()
-    return {sid for i in range(max(hit[0] - 1, 0), hit[-1] + 1) for sid in turns[i]}
+    return set(targets) | {sid for i in hit if i for sid in turns[i - 1]}  # per target turn (rebuild chunks)
 
 
 def parse_facts(call: Call, target_segment_ids: tuple[str, ...], response: Any,

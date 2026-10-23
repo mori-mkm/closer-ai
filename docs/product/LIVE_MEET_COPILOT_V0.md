@@ -458,7 +458,8 @@ NEXT_STEP_IDENTIFIED. Each event carries `event_type`, `value` (the lead's own w
 2. Its `segment_ids` exist in the call.
 3. Its value is an exact span of the cited segments' text, folded for accents, case and punctuation
    and matched on whole words. Any target line that contains the value is added as evidence.
-4. The span is in the new lead turn or in the turn right before it (the question being answered).
+4. The span is in a new lead line or in the other speaker's turn right before it (the question being
+   answered); earlier lines of the lead's own turn do not count (Post-call Brief fix, below).
    This way an old fact cannot be re-extracted as new from context.
    - The only exception is a stronger role for a stakeholder already in the state, when the role cue
      is in the new line ("Ele é quem dá a palavra final.").
@@ -503,6 +504,87 @@ lines):
 - Recommendation latency, one meeting at a realistic pace (on vs off, 2 runs each), was comparable.
   When a lead line arrives while an extraction is already running, it waits for it (up to ~4.5 s seen
   once).
+
+## Post-call Brief v0 (`feat/post-call-brief-v0`, 2026-10-23)
+
+### AUTHORITY gate: stakeholder discovery is not an objection
+
+**Problem:** E1 labeled a short answer to a discovery question AUTHORITY_INTERNAL_BUY_IN.
+- Example: "Além de você, alguém participa da decisão?" → "Sim, meu sócio."
+- The policy accepted the label, which produced a live recommendation, an `OBJECTION_IDENTIFIED` and
+  an `OBJECTION_RAISED` risk in the brief.
+- Root cause: no gate checked the category's defining condition. `authority_override` only turns
+  TIMING into AUTHORITY.
+
+**Rule:** AUTHORITY_INTERNAL_BUY_IN is now in `CORROBORATION`, the same mechanism as the
+IMPLEMENTATION gate. The lead's own objection words must state a dependency that **blocks moving
+forward**. Any of these counts:
+- an obligation to consult or get approval ("preciso falar com", "precisa aprovar", "vou conversar
+  com");
+- not being able to decide alone ("não posso decidir", "decidir sozinho");
+- moving only after someone's approval ("depois da aprovação");
+- a dependency ("depende do").
+
+Naming a stakeholder ("Meu sócio.", "Eu e meu diretor.", "Sou eu e a minha sócia.") is a Commercial
+State fact. It gets `UNCORROBORATED_CATEGORY`: no recommendation and no objection event.
+
+**qwen3:8b matrix** (`python -m closer_ai.live.bench --authority --repeat 2`; 6 discovery answers and 6
+blocking objections):
+
+| | Discovery false positives | Blocking objections shown |
+|---|---|---|
+| before | 6/12 | 12/12 |
+| after | **0/12** | **12/12** (incl. the real-Meet "Preciso falar com um sócio antes de fechar." and the cut "…sócio antes") |
+
+
+```
+Commercial State = facts        Post-call Brief = presentation of those facts
+CommercialState → build_brief → PostCallBrief → JSON (to_json) / Markdown (render_markdown)
+```
+
+Code: `src/closer_ai/live/post_call_brief.py`. The brief makes no LLM call and runs no classification.
+It reads only the meeting's `CommercialState` and the session's own analysis records.
+
+- **Model:**
+  - `meeting_id`, `finalized_at`, `summary`;
+  - the 8 state fields, copied as they are: each fact keeps `value`, `segment_ids`, `status` and `role`;
+  - `risks` (`code`, `label`, `segment_ids`);
+  - `recommendation_stats`: `recommendations_created`, `recommendations_by_category`,
+    `categories_detected`, `analyses_completed`;
+  - `notes`, which carries coverage caveats.
+- **Summary:** deterministic. One fixed pt-BR phrase per non-empty field, with the state values in
+  quotes, exactly as they are. It has no coaching and makes no inference, so it can only say what the
+  state has.
+  - `summary_is_grounded` re-checks that every quoted span is a state value; if not, the summary is
+    replaced by "Resumo indisponível (validação de grounding falhou)." (fail-closed).
+  - It is the guard an LLM summary would have to pass later.
+- **Risks** (deterministic and conservative; knowing a stakeholder is a fact, not a risk):
+  - `OBJECTION_RAISED`, one per objection in the state: the copilot does not track resolution;
+  - `DECISION_PROCESS_NOT_RECORDED`: a stakeholder with role decision_participant or
+    final_decision_maker exists and no decision process was recorded;
+  - `NO_NEXT_STEP_RECORDED`: no next step in the state.
+  - A "no buying signal" risk was left out on purpose: it would be a judgment, not a fact.
+- **Finalize:**
+  - `POST /finalize {"meeting_id"}` (or `Runtime.finalize`) waits up to 60 s for the analysis or
+    extraction in progress (503 if it is still busy, 404 for an unknown meeting).
+  - It then reads the lead lines not read yet, without waiting for a pause, and builds the brief.
+  - It is **idempotent**: the first brief is kept on the session and returned again unchanged, with no
+    new LLM call and no change to the state or counters.
+  - Lines spoken after finalize still feed the live state but not that brief.
+- **UI:** the ••• → Avançado panel has a "Finalizar call · brief" button. After finalize, the brief's
+  Markdown is shown at the top of that panel (`post_call_brief` in GET `/recommendation`). The main UX
+  is unchanged.
+- **Persistence:** none. The brief lives in the runtime's memory and is returned by the endpoint.
+- **Recovery:** after a restart, the rebuilt state (non-objection facts) gives a valid brief.
+  - No objection is analyzed again and no recommendation is created.
+  - `notes` says that objections and recommendations from before the restart are not included. That
+    is the known Commercial State limitation, and `recommendation_stats` cover this runtime only.
+
+Fix found by the real qwen3:8b run: in "Sim, meu sócio." → "Fazemos tudo manualmente." the model
+re-emitted the stakeholder, citing the new line. It passed the grounding because both lines were the
+same lead turn. The scope is now the new lead line(s) plus the other speaker's turn right before each
+of them. The re-cite is rejected (`NOT_IN_TARGET`), and the commercial bench is unchanged at 10/11
+with 0 invented.
 
 ## Runtime configuration (measured)
 
@@ -617,10 +699,15 @@ Options:
   replacing each other).
 - The Meet selectors were verified in real test meetings only; Meet can change its DOM.
 - Any non-closer speaker is treated as the lead (1:1 calls only).
+- The AUTHORITY gate is a phrase-pattern list: an authority objection phrased without an obligation,
+  inability or approval-sequencing verb is not shown (`ponytail:` in `session.py`).
 - The IMPLEMENTATION_INTEGRATION gate is a stem list with a recall ceiling (`ponytail:` in
   `session.py`).
 - One analysis runs at a time (an Ollama call is never cancelled); latest-wins keeps at most one lead
   line waiting.
+- **Post-call Brief v0:** only presents the state, so it inherits its recall misses. In the real
+  validation run, "Fazemos tudo manualmente." right after "Sim, meu sócio." gave no pain (2/2; alone it
+  gives the pain 2/2). Finalize is explicit (no end-of-Meet detection) and nothing is persisted.
 - **Commercial State v0:** facts are the lead's literal words, with small closed type rules (the
   COMMERCIAL_TERM and DECISION_PROCESS cue lists are `ponytail:` word lists). Measured only on 11
   synthetic cases. Dedup is exact-key, so paraphrases are separate items. Closer-stated facts are

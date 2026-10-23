@@ -9,6 +9,7 @@
 //   {ok: false, error: "INVALID_RESPONSE", status}    2xx but not JSON (another program on the port?)
 const BASE = "http://127.0.0.1:8765";
 const TIMEOUT_MS = 3000;
+const FINALIZE_TIMEOUT_MS = 90000; // finalize waits for the analysis in progress (runtime: up to 60 s)
 
 async function relay(msg) {
   const headers = { "X-AI-Closer": "1" };
@@ -19,6 +20,9 @@ async function relay(msg) {
   } else if (msg.type === "rehydrate") {
     url = `${BASE}/rehydrate`;
     init = { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(msg.body) };
+  } else if (msg.type === "finalize") {
+    url = `${BASE}/finalize`;
+    init = { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(msg.body) };
   } else if (msg.type === "health") {
     url = `${BASE}/health`;
     init = { method: "GET" };
@@ -27,7 +31,7 @@ async function relay(msg) {
     init = { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(msg.body) };
   }
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), msg.type === "finalize" ? FINALIZE_TIMEOUT_MS : TIMEOUT_MS);
   let r;
   try {
     r = await fetch(url, { ...init, signal: ctrl.signal });
