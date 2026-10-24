@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "closer-ai/evals/real_calls/annotation.schema.json",
+  "title": "Real call annotation v1 (one JSONL record)",
+  "description": "A record WITH `sequence` labels one utterance; a record WITHOUT it labels the whole call (scope, rules). Only what is labeled is scored: a scope other than COMPLETE never produces false positives.",
+  "type": "object",
+  "required": ["meeting_id"],
+  "additionalProperties": false,
+  "properties": {
+    "meeting_id": {"type": "string"},
+    "sequence": {"type": "integer"},
+    "source": {"enum": ["human", "calibration_reference", "synthetic_fixture"]},
+    "annotator": {"type": "string"},
+    "notes": {"type": "string"},
+    "scope": {
+      "description": "Call record only. COMPLETE = every lead line was reviewed for this dimension (unlabeled = negative); PARTIAL = only the labeled lines count (recall only); NONE = not reviewed (UNLABELED).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "objections": {"enum": ["COMPLETE", "PARTIAL", "NONE"]},
+        "opportunities": {"enum": ["COMPLETE", "PARTIAL", "NONE"]},
+        "facts": {"enum": ["COMPLETE", "PARTIAL", "NONE"]},
+        "seller_action": {"enum": ["COMPLETE", "PARTIAL", "NONE"]}
+      }
+    },
+    "expected_rules": {
+      "description": "Call record only: final compliance status per rule id.",
+      "type": "object",
+      "additionalProperties": {"enum": ["SATISFIED", "PENDING", "VIOLATED", "UNKNOWN", "NOT_APPLICABLE"]}
+    },
+    "expected_objection": {
+      "type": "object",
+      "required": ["present"],
+      "additionalProperties": false,
+      "properties": {
+        "present": {"enum": [true, false, "AMBIGUOUS"]},
+        "category": {"enum": ["PRICE_BUDGET", "TIMING_PRIORITY", "NEED_VALUE_FIT", "AUTHORITY_INTERNAL_BUY_IN",
+                              "TRUST_RISK", "COMPETITION_EXISTING_SOLUTION", "IMPLEMENTATION_INTEGRATION",
+                              "TERMS_PROCESS", "OTHER", "UNKNOWN"]},
+        "acceptable_categories": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "accept_at": {
+      "description": "Other sequences where a detection still counts for this label (the episode's lead context lines).",
+      "type": "array", "items": {"type": "integer"}
+    },
+    "expected_opportunities": {
+      "type": "array",
+      "items": {"anyOf": [
+        {"type": "string"},
+        {"type": "object", "required": ["id"], "additionalProperties": false,
+         "properties": {"id": {"type": "string"},
+                        "final_status": {"enum": ["ACTIVE", "RESOLVED", "SUPPRESSED"]}}}
+      ]}
+    },
+    "expected_facts": {
+      "type": "array",
+      "items": {"type": "object", "required": ["type", "value"], "additionalProperties": false,
+                "properties": {
+                  "type": {"enum": ["pain", "impact", "stakeholder", "decision_process", "buying_signal",
+                                    "commercial_term", "next_step"]},
+                  "value": {"type": "string"}}}
+    },
+    "expected_seller_action": {
+      "description": "The card that should be on screen before the next utterance.",
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": false,
+      "properties": {"source": {"enum": ["OBJECTION", "OPPORTUNITY", "NONE"]},
+                     "id": {"type": "string"}}
+    },
+    "seller_action_quality": {"enum": ["GOOD", "ACCEPTABLE", "BAD", "WRONG_MOMENT"]},
+    "known_failure": {
+      "description": "Known failure pattern id: the case is expected to fail until it is fixed (reported, never hidden).",
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{"meeting_id": "CAL01", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL01", "sequence": 2, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}, "accept_at": [4]}
+{"meeting_id": "CAL01", "sequence": 8, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}, "accept_at": [10]}
+{"meeting_id": "CAL02", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL02", "sequence": 4, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}, "accept_at": [6]}
+{"meeting_id": "CAL02", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL03", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "sequence": 4, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "sequence": 5, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "sequence": 7, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "sequence": 9, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "sequence": 10, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "sequence": 12, "expected_objection": {"present": false}}
+{"meeting_id": "CAL03", "sequence": 14, "expected_objection": {"present": "AMBIGUOUS"}}
+{"meeting_id": "CAL04", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL04", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}, "accept_at": [4]}
+{"meeting_id": "CAL05", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL05", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT", "acceptable_categories": ["PRICE_BUDGET"]}, "accept_at": [4]}
+{"meeting_id": "CAL06", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL06", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET", "acceptable_categories": ["IMPLEMENTATION_INTEGRATION"]}, "accept_at": [4, 6]}
+{"meeting_id": "CAL07", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL07", "sequence": 8, "expected_objection": {"present": true, "category": "UNKNOWN"}, "accept_at": []}
+{"meeting_id": "CAL07", "sequence": 2, "expected_objection": {"present": "AMBIGUOUS"}}
+{"meeting_id": "CAL07", "sequence": 6, "expected_objection": {"present": "AMBIGUOUS"}}
+{"meeting_id": "CAL08", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL08", "sequence": 3, "expected_objection": {"present": true, "category": "COMPETITION_EXISTING_SOLUTION"}, "accept_at": [5, 7]}
+{"meeting_id": "CAL08", "sequence": 1, "expected_objection": {"present": false}}
+{"meeting_id": "CAL09", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL09", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION", "acceptable_categories": ["TIMING_PRIORITY"]}, "accept_at": [4]}
+{"meeting_id": "CAL10", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL10", "sequence": 2, "expected_objection": {"present": true, "category": "OTHER", "acceptable_categories": ["TERMS_PROCESS"]}, "accept_at": [4]}
+{"meeting_id": "CAL10", "sequence": 8, "expected_objection": {"present": true, "category": "PRICE_BUDGET", "acceptable_categories": ["TIMING_PRIORITY"]}, "accept_at": [10]}
+{"meeting_id": "CAL11", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL11", "sequence": 2, "expected_objection": {"present": true, "category": "TERMS_PROCESS"}, "accept_at": [4]}
+{"meeting_id": "CAL11", "sequence": 6, "expected_objection": {"present": true, "category": "PRICE_BUDGET", "acceptable_categories": ["TERMS_PROCESS"]}, "accept_at": [8]}
+{"meeting_id": "CAL12", "source": "calibration_reference", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}, "notes": "REFERENCE != GOLD (docs/evals/calibration/REFERENCE_ANSWERS_V0_1.md); not agro"}
+{"meeting_id": "CAL12", "sequence": 5, "expected_objection": {"present": true, "category": "TRUST_RISK", "acceptable_categories": ["IMPLEMENTATION_INTEGRATION"]}, "accept_at": [9]}
+{"meeting_id": "CAL12", "sequence": 1, "expected_objection": {"present": false}}
+{"meeting_id": "CAL12", "sequence": 3, "expected_objection": {"present": false}}
