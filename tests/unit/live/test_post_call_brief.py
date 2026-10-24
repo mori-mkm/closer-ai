@@ -98,7 +98,7 @@ def test_summary_grounding_fails_closed(monkeypatch):
     assert summary_is_grounded(_brief(RICH).summary, RICH)
     assert not summary_is_grounded("O “CFO” precisa aprovar “R$ 10.000”.", RICH)
     import closer_ai.live.post_call_brief as pcb
-    monkeypatch.setattr(pcb, "build_summary", lambda facts: "O lead disse “o CFO aprova R$ 10.000”.")
+    monkeypatch.setattr(pcb, "build_summary", lambda facts, *_: "O lead disse “o CFO aprova R$ 10.000”.")
     b = pcb.build_brief("m1", RICH, [], {}, 1.0)
     assert b.summary == "Resumo indisponível (validação de grounding falhou)." and "CFO" not in render_markdown(b)
 

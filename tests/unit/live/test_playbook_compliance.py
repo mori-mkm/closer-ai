@@ -17,13 +17,11 @@ from closer_ai.live.playbook import (
     evaluate,
     load_playbook,
     parse_playbook,
-    phrase_hits,
-    quantity,
-    schedule,
 )
 from closer_ai.live.post_call_brief import render_markdown
 from closer_ai.live.server import Runtime, parse_utterance
 from closer_ai.live.session import LiveConfig, LiveSalesSession
+from closer_ai.live.signals import phrase_hits, quantity, schedule
 
 MARKDOWN = Path(PLAYBOOK).with_name("PLAYBOOK_COMERCIAL_AGROTALENTO_v1.md")
 
@@ -115,17 +113,17 @@ def test_the_schema_is_validated():
                    {**good, "rules": [{**good["rules"][0], "id": "R1"}]},
                    {**good, "rules": good["rules"] * 2},
                    {**good, "rules": [{**good["rules"][0], "evidence_type": "prohibited_phrase"}]},
-                   {**good, "commercial_info": [{"id": "x", "business_status": "MAYBE"}]}):
+                   {**good, "business_knowledge": [{"id": "x", "business_status": "MAYBE"}]}):
         with pytest.raises(ValueError):
             parse_playbook(broken)
 
 
 def test_pending_confirmation_information_is_never_authorized():
     pb = load_playbook()
-    status = {i["id"]: i["business_status"] for i in pb.commercial_info}
+    status = {i["id"]: i["business_status"] for i in pb.business_knowledge}
     for pending in ("price_cohort", "second_chair_in_person", "guarantee_30_days"):
         assert status[pending] == "PENDING_CONFIRMATION"
-    authorized = {i["id"] for i in pb.authorized_commercial_info()}
+    authorized = {i["id"] for i in pb.authorized_knowledge()}
     assert authorized and all(status[i] == "CONFIRMED" for i in authorized)
     assert not authorized & {"price_cohort", "second_chair_in_person", "guarantee_30_days"}
 
@@ -237,24 +235,33 @@ def test_prohibited_phrases_from_the_closer(line, violated):
 
 def test_the_lead_saying_a_prohibited_phrase_is_not_a_violation():
     assert _r(_eval(lines=[("lead", "Ninguém faz risco zero, né?")]), "E4-R5").status == "PENDING"
-    assert phrase_hits("Isso se paga sozinho", ("se paga sozinho",)) == ["se paga sozinho"]
+    assert phrase_hits("Isso se paga sozinho", ("se paga sozinho",)) == ("se paga sozinho",)
 
 
-def test_objection_answered_and_cause_not_decided_in_v1():
-    state = _eval(_facts(objection_event("PRICE_BUDGET", ["seg_1"])), [("lead", "Achei caro.")])
-    assert _r(state, "E10-R1").status == "PENDING" and _r(state, "E10-R2").status == "UNKNOWN"
-    state = _eval(_facts(objection_event("PRICE_BUDGET", ["seg_1"])),
-                  [("lead", "Achei caro."), ("closer", "Caro em relação a quê?")])
+def test_objection_answered_and_cause_probe():
+    price = _facts(objection_event("PRICE_BUDGET", ["seg_1"]))
+    state = _eval(price, [("lead", "Achei caro.")])
+    assert _r(state, "E10-R1").status == "PENDING" and _r(state, "E10-R2").status == "PENDING"
+    state = _eval(price, [("lead", "Achei caro."), ("closer", "Caro em relação a quê?")])
     assert (_r(state, "E10-R1").status, _r(state, "E10-R1").segment_ids) == ("SATISFIED", ("seg_1", "seg_2"))
-    assert _r(_eval(), "E10-R1").status == "NOT_APPLICABLE"
+    assert (_r(state, "E10-R2").status, _r(state, "E10-R2").segment_ids) == ("SATISFIED", ("seg_1", "seg_2"))
+    # an argument first, a probe only later: not judged as investigated (and never as a violation)
+    state = _eval(price, [("lead", "Achei caro."), ("closer", "Mas o programa entrega muito."),
+                          ("closer", "Caro em relação a quê?")])
+    assert _r(state, "E10-R2").status == "UNKNOWN"
+    assert _r(_eval(), "E10-R1").status == "NOT_APPLICABLE" and _r(_eval(), "E10-R2").status == "NOT_APPLICABLE"
+    other = _facts(objection_event("COMPETITION_EXISTING_SOLUTION", ["seg_1"]))
+    assert _r(_eval(other, [("lead", "Já uso outra coisa.")]), "E10-R2").status == "NOT_APPLICABLE"
 
 
 def test_unimplemented_rules_are_listed_not_guessed():
     state = _eval()
     evaluated = {r.rule_id for r in state.rule_results}
-    assert evaluated == {"E1-R5", "E3-R1", "E4-R1", "E4-R2", "E4-R5", "E6-R1", "E6-R2", "E10-R1", "E10-R2", "E12-R1"}
+    assert evaluated == {"E1-R5", "E3-R1", "E4-R1", "E4-R2", "E4-R5", "E5-R1", "E6-R1", "E6-R2", "E7-R1", "E9-R1",
+                         "E9-R3", "E9-R4", "E10-R1", "E10-R2", "E11-R1", "E11-R2", "E11-R4", "E12-R1", "E12-R3"}
     assert not evaluated & set(state.not_evaluated) and len(evaluated) + len(state.not_evaluated) == 61
-    assert state.pending_required == ["E3-R1", "E4-R1", "E4-R2", "E6-R1", "E6-R2", "E12-R1"]
+    assert state.pending_required == ["E3-R1", "E4-R1", "E4-R2", "E5-R1", "E6-R1", "E6-R2", "E7-R1", "E9-R1",
+                                      "E9-R3", "E9-R4", "E12-R1"]
 
 
 # --- live session -----------------------------------------------------------------------------------
@@ -300,7 +307,7 @@ def test_compliance_is_idempotent(kb):
     first = s.compliance().view()
     assert s.compliance().view() == first
     s.add(s.utterances[-1])  # the same utterance delivered again
-    assert s.compliance().view() == first and len(first["rule_results"]) == 10
+    assert s.compliance().view() == first and len(first["rule_results"]) == 19
 
 
 def test_recovery_rebuilds_the_compliance_state_without_recommendations(kb):

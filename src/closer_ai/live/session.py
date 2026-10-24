@@ -41,6 +41,7 @@ from closer_ai.ai.objection_classifier import (
 from closer_ai.ai.objection_guidance import ObjectionKnowledge, _generic, guide_episode
 from closer_ai.ai.ollama_provider import OllamaError
 from closer_ai.demo.analyze_call import InputTooLargeError
+from closer_ai.live import signals as live_signals
 from closer_ai.live.commercial_state import (
     FACTS_SCHEMA,
     CommercialEvent,
@@ -48,6 +49,13 @@ from closer_ai.live.commercial_state import (
     build_facts_prompt,
     objection_event,
     parse_facts,
+)
+from closer_ai.live.opportunities import (
+    OpportunityState,
+    SellerAction,
+    arbitrate,
+    evaluate_opportunities,
+    superseding,
 )
 from closer_ai.live.playbook import PlaybookComplianceState, evaluate, load_playbook
 from closer_ai.live.post_call_brief import PostCallBrief, build_brief
@@ -262,7 +270,8 @@ class Recommendation:
     question: str
     grade: str
     shown_at: float
-    state: str = "ACTIVE"  # ACTIVE | EXPIRED | REPLACED | DISMISSED
+    state: str = "ACTIVE"  # ACTIVE | EXPIRED | REPLACED | DISMISSED | SUPERSEDED (the call moved past it)
+    superseded_by: str | None = None  # the RESOLVED opportunity id that retired it
     # Retrieval provenance, shown in the debug panel: proves which knowledge unit/move was used.
     knowledge_unit: str | None = None
     move_id: str | None = None
@@ -365,7 +374,7 @@ class LiveSalesSession:
     counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
         "received", "accepted", "duplicates_suppressed", "rejected", "rehydrated", "analyses_started",
         "analyses_completed",
-        "analysis_errors", "recommendations_created"), 0))
+        "analysis_errors", "recommendations_created", "recommendations_superseded"), 0))
     _short_ids: dict[int, str] = field(default_factory=dict)
     lock: threading.RLock = field(default_factory=threading.RLock)
     # Temporary debug for the first real-Meet tests (`--debug`): stage log + last-event summary for the panel.
@@ -382,6 +391,12 @@ class LiveSalesSession:
     brief: PostCallBrief | None = None  # set once by finalize(); the same brief is returned after that
     _analysis_done_at: float = 0.0  # the last objection analysis finished (the closer usually answers now)
     compliance_ms: float = 0.0  # last Playbook Compliance evaluation (deterministic, read-time only)
+    opportunity_ms: float = 0.0  # last Opportunity evaluation (idem)
+    arbitration_ms: float = 0.0  # last seller-action arbitration (idem)
+    hidden_opportunities: set[str] = field(default_factory=set)  # dismissed by the closer (display only)
+    seller_actions_shown: dict[str, str] = field(default_factory=dict)  # source_id -> source (debug counters)
+    _intel_key: tuple = ()  # (lines, last line, facts events): compliance + opportunities change only with them
+    _intel: tuple = ()
     fact_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys((
         "extractions", "rebuild_extractions", "extraction_errors", "events_accepted", "events_rejected",
         "facts_added", "facts_updated"), 0))
@@ -508,9 +523,13 @@ class LiveSalesSession:
                 rec.state = "EXPIRED"
             return rec if rec and rec.state == "ACTIVE" else None
 
-    def dismiss(self) -> None:
+    def dismiss(self, opportunity_id: str | None = None) -> None:
+        """The closer dismissed what the dock shows: the recommendation, or (with its id) an opportunity,
+        which stays in the state but is not shown again."""
         with self.lock:
-            if self.current():
+            if opportunity_id:
+                self.hidden_opportunities.add(opportunity_id)
+            elif self.current():
                 self.current_recommendation.state = "DISMISSED"
 
     def mark_displayed(self, rec_id: int) -> None:
@@ -842,15 +861,51 @@ class LiveSalesSession:
     # --- playbook compliance ------------------------------------------------------------------------
 
     def compliance(self) -> PlaybookComplianceState:
-        """Playbook Compliance of the call so far: a pure function of the Commercial State and the
-        transcript, recomputed when read (never on the recommendation's path, no LLM). Rebuilt for free
-        after a restart: rehydrated lines + the rebuilt Commercial State give the same result."""
+        return self.intelligence()[0]
+
+    def intelligence(self) -> tuple[PlaybookComplianceState, OpportunityState, SellerAction | None]:
+        """Compliance -> opportunities -> the ONE seller action, from the Commercial State and the
+        transcript: pure functions recomputed when read (never on the recommendation's path, no LLM).
+        Rebuilt for free after a restart: rehydrated lines + the rebuilt Commercial State give the same
+        result (objections before the restart are the known exception: see opportunities.py)."""
         with self.lock:
-            started = time.perf_counter()
-            state = evaluate(load_playbook(), self.commercial.view(),
-                             [(self._sid(u.sequence), u.role, u.text) for u in self.utterances])
-            self.compliance_ms = round((time.perf_counter() - started) * 1000, 2)
-            return state
+            key = (len(self.utterances), self.utterances[-1].sequence if self.utterances else None,
+                   len(self.commercial.events))
+            if key != self._intel_key:  # polled every 0.5 s: recompute only when the call changed
+                playbook, facts = load_playbook(), self.commercial.view()
+                segments = [(self._sid(u.sequence), u.role, u.text) for u in self.utterances]
+                t0 = time.perf_counter()
+                signals = live_signals.extract(segments)  # cached per line
+                compliance = evaluate(playbook, facts, segments, signals)
+                t1 = time.perf_counter()
+                opportunities = evaluate_opportunities(playbook, facts, segments, signals)
+                t2 = time.perf_counter()
+                self.compliance_ms, self.opportunity_ms = round((t1 - t0) * 1000, 3), round((t2 - t1) * 1000, 3)
+                self._intel_key, self._intel = key, (compliance, opportunities)
+            compliance, opportunities = self._intel
+            t2 = time.perf_counter()
+            rec = self.current()
+            rec_seq = next((self._position(self._sid(t["sequence"])) for t in reversed(self.timings)
+                            if rec and t.get("recommendation_id") == rec.id and t.get("sequence") is not None), None)
+            if rec and (by := superseding(rec.category, rec_seq, opportunities)):
+                rec.state, rec.superseded_by = "SUPERSEDED", by.id  # retired for good: never resurfaces
+                self.counters["recommendations_superseded"] += 1
+                self._dbg("SUPERSEDED", recommendation_id=rec.id, category=rec.category, by=by.id)
+                rec = None
+            action = arbitrate(rec.view() if rec else None, rec_seq, opportunities, self.hidden_opportunities)
+            t3 = time.perf_counter()
+            self.arbitration_ms = round((t3 - t2) * 1000, 3)
+            return compliance, opportunities, action
+
+    def _position(self, segment_id: str) -> int | None:
+        """1-based position of a segment in the call (the opportunities' `created_sequence` scale)."""
+        ids = [self._sid(u.sequence) for u in self.utterances]
+        return ids.index(segment_id) + 1 if segment_id in ids else None
+
+    def note_seller_action(self, action: SellerAction | None) -> None:
+        if action is not None:
+            with self.lock:
+                self.seller_actions_shown.setdefault(action.source_id, action.source)
 
     # --- post-call brief ----------------------------------------------------------------------------
 
@@ -870,7 +925,8 @@ class LiveSalesSession:
             self.extract()
         with self.lock:
             if self.brief is None:
+                compliance, opportunities, _ = self.intelligence()
                 self.brief = build_brief(self.meeting_id, self.commercial.view(), list(self.timings),
                                          dict(self.counters), self.clock(), rebuilt=self._rehydrated_upto >= 0,
-                                         compliance=self.compliance().view())
+                                         compliance=compliance.view(), opportunities=opportunities.view())
             return self.brief

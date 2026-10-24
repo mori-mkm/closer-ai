@@ -54,12 +54,13 @@ class PostCallBrief:
     recommendation_stats: dict[str, Any]
     notes: tuple[str, ...] = field(default=())  # coverage caveats (e.g. rebuilt after a restart)
     playbook_compliance: dict[str, Any] | None = None  # PlaybookComplianceState.view() (see playbook.py)
+    opportunities: dict[str, list[dict[str, Any]]] | None = None  # resolved / missed / suppressed (finalized)
 
     def to_json(self) -> dict[str, Any]:
         return {"meeting_id": self.meeting_id, "finalized_at": self.finalized_at, "summary": self.summary,
                 **self.facts, "risks": [{**asdict(r), "segment_ids": list(r.segment_ids)} for r in self.risks],
                 "recommendation_stats": self.recommendation_stats, "notes": list(self.notes),
-                "playbook_compliance": self.playbook_compliance}
+                "playbook_compliance": self.playbook_compliance, "opportunities": self.opportunities}
 
 
 def _q(value: str) -> str:
@@ -71,9 +72,20 @@ def _stakeholder(f: dict[str, Any]) -> str:
     return f"{f['value']} ({ROLE_LABELS[role]})" if role in ROLE_LABELS and role != "mentioned" else f["value"]
 
 
-def build_summary(facts: dict[str, list[dict[str, Any]]]) -> str:
+def finalized_opportunities(view: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """At finalize: RESOLVED = covered in the call; still ACTIVE = missed (only now, never during the call);
+    SUPPRESSED = covered before the trigger or blocked by business confirmation (not missed)."""
+    ops = view["opportunities"]
+    return {"resolved": [o for o in ops if o["status"] == "RESOLVED"],
+            "missed": [o for o in ops if o["status"] == "ACTIVE"],
+            "suppressed": [o for o in ops if o["status"] == "SUPPRESSED"]}
+
+
+def build_summary(facts: dict[str, list[dict[str, Any]]], compliance: dict[str, Any] | None = None,
+                  opportunities: dict[str, list[dict[str, Any]]] | None = None) -> str:
     """Short, factual pt-BR summary: one sentence per non-empty field, values verbatim (quoted when they
-    are the lead's words). No coaching, no inference."""
+    are the lead's words), then the required playbook rules still pending and the opportunities. No
+    coaching, no inference: every sentence is a template over the state."""
     def vals(name: str) -> str:
         return "; ".join(_q(f["value"]) for f in facts[name])
 
@@ -95,6 +107,13 @@ def build_summary(facts: dict[str, list[dict[str, Any]]]) -> str:
         parts.append(f"Termos comerciais mencionados: {vals('commercial_terms')}.")
     if facts["next_steps"]:
         parts.append(f"Próximo passo: {vals('next_steps')}.")
+    if compliance and compliance["pending_required"]:  # ids only: the titles are in the compliance section
+        parts.append(f"Regras obrigatórias pendentes ({len(compliance['pending_required'])}): "
+                     + ", ".join(compliance["pending_required"]) + ".")
+    for key, label in (("resolved", "Oportunidades aproveitadas"), ("missed", "Oportunidades não aproveitadas")):
+        if opportunities and opportunities[key]:
+            parts.append(f"{label}: " + "; ".join(f"{o['playbook_op_id']} ({o['title']})"
+                                                  for o in opportunities[key]) + ".")
     return " ".join(parts) or "Nenhum fato comercial registrado nesta call."
 
 
@@ -137,13 +156,15 @@ def recommendation_stats(timings: list[dict[str, Any]], counters: dict[str, int]
 
 def build_brief(meeting_id: str, facts: dict[str, list[dict[str, Any]]], timings: list[dict[str, Any]],
                 counters: dict[str, int], finalized_at: float, rebuilt: bool = False,
-                compliance: dict[str, Any] | None = None) -> PostCallBrief:
-    summary = build_summary(facts)
+                compliance: dict[str, Any] | None = None,
+                opportunities: dict[str, Any] | None = None) -> PostCallBrief:
+    ops = finalized_opportunities(opportunities) if opportunities is not None else None
+    summary = build_summary(facts, compliance, ops)
     if not summary_is_grounded(summary, facts):  # cannot happen with the template; fail closed anyway
         summary = "Resumo indisponível (validação de grounding falhou)."
     notes = (REBUILT_NOTE,) if rebuilt else ()
     return PostCallBrief(meeting_id, finalized_at, summary, {k: list(facts[k]) for k in SECTIONS},
-                         derive_risks(facts), recommendation_stats(timings, counters), notes, compliance)
+                         derive_risks(facts), recommendation_stats(timings, counters), notes, compliance, ops)
 
 
 def _fact_line(name: str, f: dict[str, Any]) -> str:
@@ -177,6 +198,19 @@ def compliance_markdown(c: dict[str, Any]) -> list[str]:
     return out
 
 
+def opportunities_markdown(ops: dict[str, list[dict[str, Any]]]) -> list[str]:
+    def ids(o: dict[str, Any]) -> str:
+        return ", ".join(dict.fromkeys(o["trigger_segment_ids"] + o["supporting_segment_ids"]))
+
+    def line(o: dict[str, Any], why: str) -> str:
+        return f"- {o['playbook_op_id']} — {o['title']}: {why} [{ids(o)}]"
+
+    return ["## Opportunities", "", "### Resolved",
+            *([line(o, f"coberto ({o['resolution_reason']})") for o in ops["resolved"]] or ["- -"]),
+            "", "### Missed", *([line(o, f"ainda sem: {o['action']}") for o in ops["missed"]] or ["- -"]),
+            "", "### Suppressed", *([line(o, o["reason"]) for o in ops["suppressed"]] or ["- -"])]
+
+
 def render_markdown(brief: PostCallBrief) -> str:
     out = ["# Post-call Brief", "", "## Summary", brief.summary]
     for name in SECTIONS:
@@ -190,6 +224,8 @@ def render_markdown(brief: PostCallBrief) -> str:
                                                  or "-")]
     if brief.playbook_compliance is not None:
         out += ["", *compliance_markdown(brief.playbook_compliance)]
+    if brief.opportunities is not None:
+        out += ["", *opportunities_markdown(brief.opportunities)]
     if brief.notes:
         out += ["", "## Notes", *(f"- {n}" for n in brief.notes)]
     return "\n".join(out) + "\n"

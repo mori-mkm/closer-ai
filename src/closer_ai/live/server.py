@@ -8,7 +8,7 @@ Endpoints (the Chrome extension's background worker is the only intended client)
                         -> {"accepted", "status", "id", "role"}; idempotent per (meeting_id, sequence): a retry
                            of an utterance already received answers status DUPLICATE_SEQUENCE
 - GET  /recommendation?meeting_id=...                                  -> the current one or {"state": "NONE"}
-- POST /dismiss         {"meeting_id"}
+- POST /dismiss         {"meeting_id", "opportunity_id"?}
 - POST /rehydrate       {"meeting_id", "utterances": [...]} -> {"rehydrated", "utterances"}: after a runtime
                         restart the extension sends back what this meeting already had (context only)
 - POST /finalize        {"meeting_id"} -> {"brief": {...}, "markdown": "..."}: end of call, the Post-call
@@ -237,6 +237,8 @@ class Runtime:
                 view["debug"] = {"session": False}
             return view
         with s.lock:  # one consistent snapshot: never a finished result next to a stale "analyzing"
+            # first: it may retire a superseded recommendation, so `rec` below is what the dock can show
+            compliance, opportunities, action = s.intelligence()  # deterministic, < 1 ms each
             rec = s.current()
             view = {"state": "NONE"} if rec is None else rec.view()
             if rec is not None:
@@ -248,7 +250,10 @@ class Runtime:
             view["transcript"] = [{"role": u.role, "text": u.text, **({"speaker": u.speaker} if self.debug else {})}
                                   for u in s.transcript()]
             view["commercial_state"] = s.commercial.view()  # shown only in the dock's advanced panel
-            view["playbook_compliance"] = s.compliance().view()  # idem (deterministic, ~ms)
+            view["playbook_compliance"] = compliance.view()  # advanced panel only
+            view["opportunities"] = opportunities.view()  # advanced panel only
+            view["seller_action"] = action.view() if action else None  # the ONE action the dock shows
+            s.note_seller_action(action)
             if s.brief is not None:  # after POST /finalize (advanced panel only)
                 view["post_call_brief"] = {"markdown": render_markdown(s.brief), "finalized_at": s.brief.finalized_at}
         if self.debug:
@@ -262,6 +267,14 @@ class Runtime:
                                                               "displayed_latency_ms") if k in last},
                              "counters": dict(s.counters), "analysis_error_reasons": dict(s.error_reasons),
                              "commercial_counters": dict(s.fact_counters), "compliance_ms": s.compliance_ms,
+                             "opportunity_ms": s.opportunity_ms, "arbitration_ms": s.arbitration_ms,
+                             "opportunity_counters": opportunities.counters(),
+                             "seller_action_source": action.source if action else None,
+                             "seller_action_priority": action.priority if action else None,
+                             "seller_actions_from_objection": sum(v == "OBJECTION"
+                                                                  for v in s.seller_actions_shown.values()),
+                             "seller_actions_from_opportunity": sum(v == "OPPORTUNITY"
+                                                                    for v in s.seller_actions_shown.values()),
                              "fast_path": {**s.fast_path_counters, "by_category": dict(s.fast_path_by_category)},
                              "model_state": self.model_state,
                              "recommendation_state": (s.current_recommendation.state
@@ -331,7 +344,8 @@ def make_handler(runtime: Runtime) -> type[BaseHTTPRequestHandler]:
                         return self._send(503, {"error": str(exc)})
                     return self._send(200, out) if out else self._send(404, {"error": "unknown meeting"})
                 if self.path == "/dismiss":
-                    runtime.session(str(payload.get("meeting_id", ""))).dismiss()
+                    runtime.session(str(payload.get("meeting_id", ""))).dismiss(
+                        str(payload["opportunity_id"]) if payload.get("opportunity_id") else None)
                     return self._send(200, {"ok": True})
                 self._send(404, {"error": "not found"})
             except (ValueError, TypeError, AttributeError) as exc:

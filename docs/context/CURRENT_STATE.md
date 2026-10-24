@@ -150,7 +150,13 @@ menor (qwen3:4b) e contexto reduzido rejeitados; KV q8_0 opcional, não validado
 **Playbook Compliance v1** (branch `feat/playbook-engine-v1`): playbook AgroTalento em JSON versionado
 (61 regras E1–E12 + N/A, `business_status`) e engine determinístico sobre o Commercial State + sinais do closer:
 E3-R1, E4-R1/R2, E6-R1/R2, E10-R1, E12-R1 e proibições lexicais (E4-R5, E1-R5); demais regras `not_evaluated`.
-Só em ••• → Avançado e no Post-call Brief; sem score; Opportunity Detection não implementado.
+Só em ••• → Avançado e no Post-call Brief; sem score.
+**Sales Intelligence v1** (branch `feat/sales-intelligence-v1`): sinais determinísticos compartilhados
+(`signals.py`), compliance 19 regras, Opportunity Engine (OP-01/03/04/06/07/10/11/12/14; demais OPs
+no JSON como DEFERRED/BLOCKED), Seller Action Arbitration (um card só: objeção > oportunidade, exceto
+sinal de compra mais novo), Post-call Brief com oportunidades resolvidas/perdidas e replay
+`bench --sales-intelligence` (real qwen3:8b 13/14, 0 falsas oportunidades, 0 cards antigos
+reaparecendo: objeção superada vira SUPERSEDED). Sem nova chamada LLM.
 Depois, a decidir
 entre os itens do backlog no [doc do copilot](../product/LIVE_MEET_COPILOT_V0.md#backlog-from-the-2026-10-21-meeting-not-implemented):
 B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Opportunity Detection. B2 e
