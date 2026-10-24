@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from test_live_session import SCRIPT, Clock, FakeProvider, _say  # same folder
 
-from closer_ai.ai.objection_classifier import build_prompt
 from closer_ai.ai.objection_guidance import load_objection_knowledge
 from closer_ai.demo.analyze_call import CLASSIFICATION_KB, GUIDANCE_KB
 from closer_ai.live import signals
@@ -184,17 +183,6 @@ def kb():
 def _session(kb, **cfg):
     provider, clock = FakeProvider(), Clock()
     return LiveSalesSession("m1", provider, kb, CLASSIFICATION_KB, LiveConfig(**cfg), clock=clock), provider, clock
-
-
-def test_live_prompt_says_questions_buying_signals_and_negations_are_not_objections(kb):
-    s, provider, clock = _session(kb, fast_path=False)
-    _say(s, clock, 1, "lead", "Quanto custa a licença?")
-    s.analyze()
-    prompt = provider.prompts[0]
-    assert "A question asking for information" in prompt and '"não achei caro"' in prompt
-    assert "Annotate only resistance, rejection, hesitation or a blocking dependency" in prompt
-    call = s._window_call(s.utterances)
-    assert "A question asking for information" not in build_prompt(call, "E1")  # eval/post-call arms unchanged
 
 
 def test_a_rejected_candidate_is_no_recommendation_with_its_reason_and_counted(kb, monkeypatch):

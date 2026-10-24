@@ -249,10 +249,6 @@ This is a live call. The lead just said: {ids}. Analyze ONLY what the target seg
 - Every episode's objection_segment_ids must include a target segment.
 - Most lead lines are not objections: describing a pain, a problem, their current process, a fact or
   agreement is NO_OBJECTION unless it is stated as a reason not to move forward.
-- A question asking for information (price, plan, how it works, integration, references), a buying signal
-  (how to pay, when to start) and a negated or positive remark ("não achei caro", "o orçamento comporta") are
-  NO_OBJECTION by themselves. Annotate only resistance, rejection, hesitation or a blocking dependency about
-  moving forward.
 - If the target segments express no objection, return NO_OBJECTION."""
 
 

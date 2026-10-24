@@ -175,8 +175,9 @@ objeção (`screen` em `live/session.py`): non-objection guard (pergunta informa
 positivo, dor atual → `NON_OBJECTION_INFORMATION_REQUEST` / `NEGATED_RESISTANCE` / `PAIN_NOT_OBJECTION`),
 normalizações PRICE/COMPETITION sobre NEED_VALUE_FIT, gates para NEED_VALUE_FIT e COMPETITION, cues de
 AUTHORITY (conselho, assinatura) e IMPLEMENTATION (quem tocaria, alguém dedicado) ampliados; buying question
-→ `buying_signals` no Commercial State (léxico OP-14); 2 linhas no prompt LIVE TARGET. Matriz sintética de 87
+→ `buying_signals` no Commercial State (léxico OP-14). Prompt do classifier inalterado: as 2 linhas testadas no LIVE TARGET
+não mudaram nada no A/B da matriz (86/87 com e sem; mesmas 36/44 propostas em não-objeções) → REJECT. Matriz sintética de 87
 casos em `evals/real_calls/matrix/`. Gate de IMPLEMENTATION exige tópico + resistência; barreira de caixa sem
 adiamento → PRICE. Run completo qwen3:8b (19 calls, `candidate-classifier-v1-final`): precision 0.600 → 1.000,
-recall 0.750 → 0.938, FPR 0.286 → 0.000, category accuracy 0.750 → 0.933, buying_signal 0/1 → 1/1. Pendente:
-A/B do prompt (matriz baseline/old prompt) e KR-STALE-AUTHORITY ×10 (runs parados por falta de RAM).
+recall 0.750 → 0.938, FPR 0.286 → 0.000, category accuracy 0.750 → 0.933, buying_signal 0/1 → 1/1. KR-STALE-AUTHORITY ×10
+e causas de GUIDANCE_INVALID_RESPONSE ficam para Guidance Reliability v1.
