@@ -163,3 +163,10 @@ B1 (UX "última fala do cliente + sugestão"), B2 Playbook Compliance e B3 Oppor
 B3 dependem do playbook comercial AgroTalento (Gabriel). Em paralelo: testar as outras 7 categorias
 ao vivo e uma call longa de teste, ainda sem cliente. O Calibration Dataset Loader v0.1 continua
 pendente.
+**Real Call Validation & Calibration v1** (branch `eval/real-call-calibration-v1`): harness de avaliação
+`python -m closer_ai.live.eval` (replay utterance a utterance em tempo virtual com o worker single-flight;
+trace JSONL; métricas de objeção/oportunidade/Commercial State/compliance/card/latência contra anotações;
+inspetores FP/FN; EVAL_REPORT.md; `--compare`, `--rescore`, `--resume`). Contrato e fixtures sintéticas em
+[`evals/real_calls/`](../../evals/real_calls/README.md); suíte de regressões conhecidas + kit sintético (lido
+in place, referência ≠ gold). Só medição: nenhum comportamento de produção mudou. Calls reais: nenhuma no
+repo e processamento ainda bloqueado por autorização.

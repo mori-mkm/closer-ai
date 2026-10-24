@@ -1,0 +1,18 @@
+{"meeting_id": "KR-NEGATED-PRICE", "speaker": "Closer Teste", "role": "closer", "text": "O investimento é de 63 mil à vista.", "sequence": 1}
+{"meeting_id": "KR-NEGATED-PRICE", "speaker": "Lead Teste", "role": "lead", "text": "Não achei caro.", "sequence": 2}
+{"meeting_id": "KR-PAIN-AS-OBJECTION", "speaker": "Closer Teste", "role": "closer", "text": "Como funciona a rotina da fazenda?", "sequence": 1}
+{"meeting_id": "KR-PAIN-AS-OBJECTION", "speaker": "Lead Teste", "role": "lead", "text": "Hoje tudo depende de mim na fazenda.", "sequence": 2}
+{"meeting_id": "KR-STAKEHOLDER-DISCOVERY", "speaker": "Closer Teste", "role": "closer", "text": "Quem participa da decisão?", "sequence": 1}
+{"meeting_id": "KR-STAKEHOLDER-DISCOVERY", "speaker": "Lead Teste", "role": "lead", "text": "Meu sócio.", "sequence": 2}
+{"meeting_id": "KR-STAKEHOLDER-DISCOVERY-LONG", "speaker": "Closer Teste", "role": "closer", "text": "Além de você, quem participa da decisão?", "sequence": 1}
+{"meeting_id": "KR-STAKEHOLDER-DISCOVERY-LONG", "speaker": "Lead Teste", "role": "lead", "text": "Sim, meu sócio participa.", "sequence": 2}
+{"meeting_id": "KR-AUTHORITY-BLOCKER", "speaker": "Closer Teste", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "KR-AUTHORITY-BLOCKER", "speaker": "Lead Teste", "role": "lead", "text": "Preciso falar com meu sócio antes de fechar.", "sequence": 2}
+{"meeting_id": "KR-BUYING-SIGNAL", "speaker": "Closer Teste", "role": "closer", "text": "Esse é o formato do programa.", "sequence": 1}
+{"meeting_id": "KR-BUYING-SIGNAL", "speaker": "Lead Teste", "role": "lead", "text": "Pode pagar no cartão da empresa?", "sequence": 2}
+{"meeting_id": "KR-STALE-AUTHORITY", "speaker": "Closer Teste", "role": "closer", "text": "Quem participa da decisão?", "sequence": 1}
+{"meeting_id": "KR-STALE-AUTHORITY", "speaker": "Lead Teste", "role": "lead", "text": "Meu sócio.", "sequence": 2}
+{"meeting_id": "KR-STALE-AUTHORITY", "speaker": "Lead Teste", "role": "lead", "text": "Mas preciso falar com ele antes de fechar.", "sequence": 3}
+{"meeting_id": "KR-STALE-AUTHORITY", "speaker": "Closer Teste", "role": "closer", "text": "Vamos marcar com ele terça às 14h.", "sequence": 4}
+{"meeting_id": "KR-STALE-AUTHORITY", "speaker": "Lead Teste", "role": "lead", "text": "E se eu pagar no cartão da empresa?", "sequence": 5}
+{"meeting_id": "KR-STALE-AUTHORITY", "speaker": "Closer Teste", "role": "closer", "text": "Faz sentido a gente seguir?", "sequence": 6}
