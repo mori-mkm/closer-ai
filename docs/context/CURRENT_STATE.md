@@ -176,5 +176,7 @@ positivo, dor atual → `NON_OBJECTION_INFORMATION_REQUEST` / `NEGATED_RESISTANC
 normalizações PRICE/COMPETITION sobre NEED_VALUE_FIT, gates para NEED_VALUE_FIT e COMPETITION, cues de
 AUTHORITY (conselho, assinatura) e IMPLEMENTATION (quem tocaria, alguém dedicado) ampliados; buying question
 → `buying_signals` no Commercial State (léxico OP-14); 2 linhas no prompt LIVE TARGET. Matriz sintética de 87
-casos em `evals/real_calls/matrix/`. Run qwen3:8b do candidate interrompido por falta de RAM em 11/19 calls;
-nas mesmas 11 calls: precision 0.643 → 0.923, recall 0.692 → 0.923.
+casos em `evals/real_calls/matrix/`. Gate de IMPLEMENTATION exige tópico + resistência; barreira de caixa sem
+adiamento → PRICE. Run completo qwen3:8b (19 calls, `candidate-classifier-v1-final`): precision 0.600 → 1.000,
+recall 0.750 → 0.938, FPR 0.286 → 0.000, category accuracy 0.750 → 0.933, buying_signal 0/1 → 1/1. Pendente:
+A/B do prompt (matriz baseline/old prompt) e KR-STALE-AUTHORITY ×10 (runs parados por falta de RAM).

@@ -130,9 +130,8 @@ _PRICE_WORDS = re.compile(r"\b(caro|caros|carissim[oa]s?|preco|precos|orcamento|
 _NEED_DENIAL = re.compile(r"\b(nao (preciso|precisamos|resolve|serve|faz sentido|vejo valor|compensa|vale)"
                           r"|desnecessari\w*)\b")
 # Classifier Quality v1 (CAL11: "Pagar o ano todo adiantado não cabe no nosso fluxo de caixa." came as
-# IMPLEMENTATION_INTEGRATION, then dropped by its gate, and as TIMING_PRIORITY in another run): a money
-# barrier stated outright. Stronger than _PRICE_WORDS: it moves IMPLEMENTATION_INTEGRATION only when nothing is
-# about putting it in place, and TIMING_PRIORITY only when nothing postpones ("agora não, depois da safra").
+# TIMING_PRIORITY): a money barrier stated outright. Stronger than _PRICE_WORDS: it moves TIMING_PRIORITY
+# only when nothing postpones ("agora não, depois da safra" stays TIMING).
 _PRICE_STANCE = re.compile(
     r"\b(?:caro|caros|carissim\w*|nao cabe no (?:\w+ ){0,2}(?:orcamento|fluxo de caixa|caixa|bolso)"
     r"|(?:nao|nem) (?:tenho|temos) (?:\w+ )?(?:orcamento|verba|dinheiro|caixa)|pesa\w* (?:demais|muito|no bolso|no caixa)"
@@ -143,13 +142,10 @@ _POSTPONE = re.compile(r"\b(?:agora nao|nao agora|nao e o momento|depois|mais (?
 
 def price_override(category: str | None, objection_text: str) -> str | None:
     """PRICE_BUDGET when NEED_VALUE_FIT rests on explicit price words alone (negated ones removed first: "não é
-    questão de custo"), or when IMPLEMENTATION_INTEGRATION has a money barrier and nothing about putting it in
-    place, or when TIMING_PRIORITY has a money barrier and no postponement; otherwise the category unchanged."""
+    questão de custo"), or when TIMING_PRIORITY has a money barrier and no postponement; otherwise the
+    category unchanged."""
     text = _ACCEPTANCE.sub(" ", _fold(objection_text))
     if category == "NEED_VALUE_FIT" and _PRICE_WORDS.search(text) and not _NEED_DENIAL.search(text):
-        return "PRICE_BUDGET"
-    if (category == "IMPLEMENTATION_INTEGRATION" and _PRICE_STANCE.search(text)
-            and not _IMPLEMENTATION_TOPIC.search(text)):
         return "PRICE_BUDGET"
     if (category == "TIMING_PRIORITY" and _PRICE_STANCE.search(text)
             and not (_POSTPONE.search(text) or _TIME_MARKER.search(text))):

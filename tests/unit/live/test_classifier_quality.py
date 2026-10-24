@@ -100,13 +100,15 @@ def test_pain_is_not_need_value_fit_but_a_negative_evaluation_is():
         N, "UNCORROBORATED_CATEGORY")
 
 
-def test_money_barriers_win_over_need_value_fit_and_unsupported_implementation():
+def test_money_barriers_win_over_need_value_fit():
     line = "Olha, para a licença a gente tinha reservado bem menos do que isso, e cada usuário extra ainda encarece."
     assert price_override(N, line) == P
     assert price_override(N, "Não preciso disso e ainda está caro.") == N  # mixed: left as classified
     assert screen(N, "Não preciso disso e ainda está caro.") == (N, None)
     assert price_override(N, "Não é questão de custo, não vejo valor nisso.") == N  # negated price word
-    assert screen(I, "Antecipado não. Pagar o ano todo adiantado não cabe no nosso fluxo de caixa.") == (P, None)
+    # IMPLEMENTATION -> PRICE was rejected (seen once): a money line labeled IMPLEMENTATION is dropped by its gate
+    assert screen(I, "Antecipado não. Pagar o ano todo adiantado não cabe no nosso fluxo de caixa.") == (
+        I, "UNCORROBORATED_CATEGORY")
     assert screen(I, "Não temos equipe pra implantar e o valor pesa demais.") == (I, None)  # its own gate holds
 
 
