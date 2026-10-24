@@ -8,8 +8,9 @@ fail-closed grounding. What is new here is only the live policy around them:
 - Trigger: a new complete lead utterance, long enough and not a repeat of the last analyzed one.
 - Emission is conservative (the classifier over-detects): a recommendation needs a valid
   classifier run (after dropping context cited from before the anchor), a PRESENT category other than OTHER, anchored on a lead utterance that is new
-  since the previous analysis, a single candidate category, the lead's own words for a category
-  in `CORROBORATION`, and GUIDED (grounded) guidance.
+  since the previous analysis, a single candidate category, the lead's own words passing the
+  non-objection guard (not an information question, a negated/positive remark or a pain about today;
+  see `screen`) and, for a category in `CORROBORATION`, its gate, and GUIDED (grounded) guidance.
   Anything else is NO_RECOMMENDATION; showing nothing beats showing a false objection.
 - One recommendation at a time: same category inside the cooldown keeps the current one (no LLM
   guidance call); another category, or the same after the cooldown, replaces it; it expires after
@@ -108,8 +109,12 @@ def _first_sentence(text: str) -> str:
 CORROBORATION: dict[str, re.Pattern[str]] = {  # matched on the accent-folded objection words
     "IMPLEMENTATION_INTEGRATION": re.compile("|".join(map(re.escape, (
         "implant", "implement", "integr", "instal", "configur", "migr", "treina", "aplicar", "tocar isso",
-        "gente pra", "equipe pra", "equipe nao", "formato", "presencial", "adapt")))),
-}  # + AUTHORITY_INTERNAL_BUY_IN, below
+        "gente pra", "equipe pra", "equipe nao", "formato", "presencial", "adapt",
+        # Classifier Quality v1 (CAL09: "Quem tocaria essa troca? ... sem alguém dedicado a isso, não tenho
+        # como seguir." was dropped): who would run it / no one free to run it
+        "tocaria", "quem vai tocar", "dedicad", "no limite", "nao sobra ninguem", "nao temos gente",
+        "nao tenho gente", "nao temos equipe", "nao tenho equipe", "nao temos pessoal")))),
+}  # + AUTHORITY_INTERNAL_BUY_IN, NEED_VALUE_FIT and COMPETITION_EXISTING_SOLUTION, below
 
 
 # Live category normalization (real Meet, Oct 2026): after noise and a pain line, E1 labeled "Gostei da
@@ -119,16 +124,54 @@ CORROBORATION: dict[str, re.Pattern[str]] = {  # matched on the accent-folded ob
 # need or fit (mixed = ambiguous = left as classified). Matched on accent-folded text, whole words.
 # ponytail: word list, high precision / low recall by design; replace with a measured classifier fix.
 _PRICE_WORDS = re.compile(r"\b(caro|caros|carissim[oa]s?|preco|precos|orcamento|orcamentos|budget|custo|custos"
-                          r"|custa|custam|custar|verba)\b")
-_NEED_DENIAL = re.compile(r"\b(nao (preciso|precisamos|resolve|serve|faz sentido|vejo valor|compensa)"
+                          r"|custa|custam|custar|verba|encarec\w*|reservad[oa]s?|fluxo de caixa)\b")
+_NEED_DENIAL = re.compile(r"\b(nao (preciso|precisamos|resolve|serve|faz sentido|vejo valor|compensa|vale)"
                           r"|desnecessari\w*)\b")
+# Classifier Quality v1 (CAL11: "Pagar o ano todo adiantado não cabe no nosso fluxo de caixa." came as
+# IMPLEMENTATION_INTEGRATION, then dropped by its gate): a money barrier stated outright. Stronger than
+# _PRICE_WORDS: it moves IMPLEMENTATION_INTEGRATION only when that category's own gate finds nothing.
+_PRICE_STANCE = re.compile(
+    r"\b(?:caro|caros|carissim\w*|nao cabe no (?:\w+ ){0,2}(?:orcamento|fluxo de caixa|caixa|bolso)"
+    r"|(?:nao|nem) (?:tenho|temos) (?:\w+ )?(?:orcamento|verba|dinheiro|caixa)|pesa\w* (?:demais|muito|no bolso|no caixa)"
+    r"|acima do (?:\w+ )?(?:orcamento|esperado|que)|reservad\w* (?:bem )?menos|encarec\w*|fluxo de caixa)\b")
 
 
 def price_override(category: str | None, objection_text: str) -> str | None:
-    """PRICE_BUDGET when NEED_VALUE_FIT rests on explicit price words alone; otherwise the category unchanged."""
-    text = _fold(objection_text)
+    """PRICE_BUDGET when NEED_VALUE_FIT rests on explicit price words alone (negated ones removed first: "não é
+    questão de custo"), or when IMPLEMENTATION_INTEGRATION has a money barrier and nothing about putting it in
+    place; otherwise the category unchanged."""
+    text = _ACCEPTANCE.sub(" ", _fold(objection_text))
     if category == "NEED_VALUE_FIT" and _PRICE_WORDS.search(text) and not _NEED_DENIAL.search(text):
         return "PRICE_BUDGET"
+    if (category == "IMPLEMENTATION_INTEGRATION" and _PRICE_STANCE.search(text)
+            and not CORROBORATION["IMPLEMENTATION_INTEGRATION"].search(text)):
+        return "PRICE_BUDGET"
+    return category
+
+
+# Live category normalization (Classifier Quality v1, CAL08: "o escritório roda nesse sistema desde o primeiro
+# dia, a equipe domina, e a gente não vai sair dele. / Estamos bem com o que temos." came as NEED_VALUE_FIT).
+# COMPETITION_EXISTING_SOLUTION wins over NEED_VALUE_FIT only when the lead's words attach them to what they
+# use today: satisfied with it, the team masters it, or a refusal to switch that names the current solution.
+# A competitor or "outra proposta" mentioned alone never counts. ponytail: phrase patterns, precision first.
+_ATTACHED = re.compile(
+    r"\b(?:estamos bem com o que|(?:equipe|time|pessoal) (?:ja )?(?:domina|(?:esta|ta) acostumad\w*)"
+    r"|roda (?:nesse|neste|no) (?:sistema|software|programa)"
+    r"|(?:o )?que (?:temos|usamos|tenho|uso) (?:hoje )?(?:ja )?(?:atende|resolve|funciona|basta|faz isso))\b")
+_NO_SWITCH = re.compile(r"\b(?:nao|nem) (?:vamos|vai|vou|queremos|quero|pretendemos) (?:\w+ )?(?:sair|trocar|mudar"
+                        r"|largar)\b")
+_CURRENT = re.compile(r"\b(?:sistema|ferramenta|fornecedor|solucao|planilha|parceiro|atual|dele|dela"
+                      r"|que (?:temos|usamos|uso|tenho))\b")
+
+
+def _attached(text: str) -> bool:
+    return bool(_ATTACHED.search(text) or (_NO_SWITCH.search(text) and _CURRENT.search(text)))
+
+
+def competition_override(category: str | None, objection_text: str) -> str | None:
+    """COMPETITION_EXISTING_SOLUTION when NEED_VALUE_FIT rests on explicit attachment to the current solution."""
+    if category == "NEED_VALUE_FIT" and _attached(_fold(objection_text)):
+        return "COMPETITION_EXISTING_SOLUTION"
     return category
 
 
@@ -140,7 +183,7 @@ def price_override(category: str | None, objection_text: str) -> str | None:
 # counts, and any explicit time marker ("mês que vem", "viajando", "novembro") leaves it as classified.
 # ponytail: phrase patterns, high precision / low recall by design; replace with a measured classifier fix.
 _THIRD_PARTY = (r"(?:o |a |os |as )?(?:meu |minha |meus |minhas |nosso |nossa |nossos |nossas )?"
-                r"(?:socios?|socias?|chefes?|gerentes?|diretor(?:es|a|as)?|diretoria|conselho|board|presidente|ceo|cfo|"
+                r"(?:socios?|socias?|chefes?|gerentes?|diretor(?:es|a|as)?|diretoria|conselho|comite|board|presidente|ceo|cfo|"
                 r"dono|dona|donos|patrao|superior|gestor(?:a|es)?|marido|esposa|esposo|mulher|financeiro|juridico|"
                 r"compras|investidor(?:es)?)")
 _AUTHORITY_DEPENDENCY = re.compile(
@@ -184,6 +227,12 @@ _AUTHORITY_BLOCKING = re.compile(
     r"|(?:depois|antes) d[aeo]s? (?:aprovacao|autorizacao|aval|ok|validacao|liberacao|sinal verde)"
     r"|(?:depende|dependo|dependemos|dependem) (?:do|da|dos|das|de)"
     r"|(?:aprovacao|autorizacao|aval|ok) (?:do|da|dos|das) "
+    # Classifier Quality v1 (CAL04: "compra desse porte passa pelo conselho da rede, e eu não posso comprometer
+    # a empresa sem a assinatura deles." was dropped): the purchase goes through a decision body, the lead
+    # cannot commit, or moving needs someone's signature/approval.
+    rf"|passa\w* (?:\w+ )?(?:pel[oa]s?|por) {_THIRD_PARTY}\b"
+    r"|(?:nao|nem) (?:posso|podemos|consigo|conseguimos) (?:me )?comprometer"
+    r"|sem (?:a |o )?(?:assinatura|aprovacao|autorizacao|aval|ok|liberacao|validacao|sinal verde) d"
     r")")
 CORROBORATION["AUTHORITY_INTERNAL_BUY_IN"] = _AUTHORITY_BLOCKING
 
@@ -225,6 +274,156 @@ def fast_path_category(text: str) -> str | None:
     if price == authority:  # neither, or both (mixed = ambiguous)
         return None
     return "PRICE_BUDGET" if price else "AUTHORITY_INTERNAL_BUY_IN"
+
+
+# Non-objection guard (Classifier Quality v1). baseline-qwen8b (calibration kit + known regressions, 19 calls):
+# 8 of 20 detections were false, and they had three shapes: a question asking for information ("E no plano
+# anual sai por quanto?", "Qual a diferença de vocês para o sistema que a gente usa hoje?"), a negated or
+# positive budget statement ("Não achei caro.", "Hoje o orçamento comporta."), or a pain about today ("Hoje
+# tudo depende de mim na fazenda."). The guard reads the lead's own objection words and rejects only those
+# shapes, and only when the same words carry no sign of resistance. It never adds or changes a category; a
+# rejection is NO_RECOMMENDATION with its reason (fail-closed: nothing beats a false objection card).
+# ponytail: phrase patterns, precision over recall; a resistance phrased as a neutral question with none of
+# these cues ("Vale a pena pagar isso?") is rejected too. Widen _RESISTANCE when calls show such a miss.
+NON_OBJECTION_INFORMATION_REQUEST = "NON_OBJECTION_INFORMATION_REQUEST"
+NEGATED_RESISTANCE = "NEGATED_RESISTANCE"
+PAIN_NOT_OBJECTION = "PAIN_NOT_OBJECTION"
+UNCORROBORATED_CATEGORY = "UNCORROBORATED_CATEGORY"
+# every reason that rejects an episode the classifier proposed (the eval counts none of them as a detection)
+REJECTION_REASONS = (NON_OBJECTION_INFORMATION_REQUEST, NEGATED_RESISTANCE, PAIN_NOT_OBJECTION,
+                     UNCORROBORATED_CATEGORY)
+
+# Any sign of resistance: a negation or contrast, a money/difficulty/risk word, a worried "e se..." question
+# (not "e se eu pagar..."), or "como eu vou pagar". Broad on purpose: it only ever keeps an episode.
+_RESISTANCE = re.compile(
+    r"\b(?:nao|nem|nunca|sem(?! juros)|mas|porem|so que|contudo|entretanto"
+    r"|caro|cara|caros|caras|carissim\w*|salgad\w*|pesad\w*|pesa|pesando|puxad\w*|apertad\w*|demais|acima|demor\w*"
+    r"|dificil|complicad\w*|inviavel|impossivel|problema|preocup\w*|receio|medo|risco|arrisc\w*|duvida"
+    r"|encarec\w*|reservad\w*|fluxo de caixa|arrum\w*"
+    r"|e se (?!eu (?:pagar|parcelar|fechar|comecar|entrar|quiser))"
+    r"|(?:como|onde) (?:eu |a gente |nos )?(?:vou |vamos |vai |iria |iriamos )?(?:pagar|bancar|arcar))\b")
+
+
+def _resists(text: str) -> bool:
+    return bool(_RESISTANCE.search(text) or _AUTHORITY_BLOCKING.search(text) or _TIME_MARKER.search(text))
+
+
+# A sentence that asks: ends with "?" or (Meet drops the "?") opens with an interrogative after short lead-ins.
+_ASKS = re.compile(
+    r"^(?:(?:e|mas|entao|ok|certo|entendi|entendo|beleza|legal|ta|so|agora|hoje|olha|deixa eu te perguntar"
+    r"|me (?:diz|conta|fala)),? )*"
+    r"(?:quanto|quanta|quantos|quantas|qual|quais|como|quando|onde|quem|o que|por que|porque|pra que|para que"
+    r"|voces (?:tem|fazem|integram|aceitam|parcelam|atendem|oferecem|cobram|trabalham|conversam)|tem como|da pra"
+    r"|da para|pode|posso|podemos|existe|e possivel|sai por|fica (?:quanto|em quanto))\b")
+_FILLERS = {"ok", "entendi", "entendo", "certo", "sim", "ta", "hum", "humm", "legal", "beleza", "perfeito", "show",
+            "otimo", "claro", "olha", "tudo bem", "tudo certo", "ah", "ahn", "e", "bom"}
+
+
+def _information_request(text: str) -> bool:
+    """Every sentence (fillers aside) asks something; at least one does."""
+    asked = False
+    for part in re.split(r"(?<=[.?!;])\s+", text):
+        core = part.strip(" ,;:").rstrip(".!?; ").strip()
+        if not core or core in _FILLERS:
+            continue
+        if not (part.rstrip().endswith("?") or _ASKS.match(core)):
+            return False
+        asked = True
+    return asked
+
+
+# A negated or positive budget/price statement. The rest of the words still decide: "Não achei caro, mas não
+# cabe no orçamento agora." keeps its objection; "Não achei barato." is not a negation of a price objection.
+_ACCEPTANCE = re.compile(
+    r"\b(?:(?:nao|nem) (?:\w+ ){0,2}?(?:caro|cara|caros|caras|carissim\w*|salgad\w*|pesad\w*|puxad\w*)"
+    r"|(?:o |a )?(?:preco|valor|investimento|custo|orcamento|dinheiro|verba) nao (?:e|eh|seria|vai ser|sera)"
+    r" (?:um |o )?(?:problema|empecilho|obstaculo|impeditivo)"
+    r"|nao (?:e|eh) (?:uma )?(?:questao|problema) de (?:preco|custo|valor|dinheiro|orcamento|verba)"
+    r"|(?:o |a )?(?:preco|valor|investimento|custo) (?:esta|ta|fica|ficou|e|eh|parece) (?:\w+ )?(?:ok|bom|tranquilo"
+    r"|justo|razoavel|honesto|adequado|otimo|em conta)"
+    r"|dentro do (?:\w+ )?orcamento|(?<!nao )(?:cabe|coube|cabem) (?:no|dentro do) (?:\w+ )?(?:orcamento|bolso|caixa)"
+    r"|(?:o )?orcamento (?:\w+ )?(?:comporta|permite|da conta|cobre|aguenta|suporta))\b")
+
+# A pain/limitation about how they work today (Commercial State and OP-06/OP-07 territory, not an objection).
+_PAIN = re.compile(
+    r"\b(?:tudo depende de mim|depende tudo de mim|tudo passa por mim|(?:o |meu |nosso )?gerente nao decide"
+    r"(?: nada)?(?: sem mim)?|nao decide nada sem mim"
+    r"|(?:fazemos|faco|faz|fazem|e) tudo (?:manual\w*|na mao|no papel|na planilha|no caderno)"
+    r"|(?:fazemos|faco|e feito|sao feitos?) (?:\w+ )?manualmente"
+    r"|(?:perde|perdemos|perco|perdem|gasta|gastamos|gasto) (?:\w+ )?(?:muito |bastante )?tempo"
+    r"|(?:tenho|temos) (?:muita |bastante )?dificuldade"
+    r"|(?:nao|nem) sei (?:qual e |qual )?(?:a |o )?(?:minha |meu |nossa |nosso )?(?:margem|custo|lucro|numeros)"
+    r"|(?:nao|nem) tenho (?:controle|nocao|ideia) (?:do|de|dos|da|das) (?:\w+ )?(?:custos?|margem|financeiro|numeros))\b")
+
+# NEED_VALUE_FIT / COMPETITION_EXISTING_SOLUTION gates: a negative evaluation of the proposed solution, or
+# blocking the purchase, in the lead's own words (not a pain about today, not a comparison question).
+_NEED_RESISTANCE = re.compile(
+    r"\b(?:(?:nao|nem) (?:vejo|vi|sinto|enxergo|percebo) (?:\w+ )?(?:necessidade|valor|sentido|vantagem|diferenca"
+    r"|beneficio|ganho|motivo|razao|utilidade)"
+    r"|(?:nao|nem) (?:preciso|precisamos|precisaria|precisariamos|resolve|resolveria|serve|serviria|compensa"
+    r"|compensaria|vale|valeria|funciona|funcionaria|atende|atenderia|se aplica|se paga|se justifica|combina"
+    r"|encaixa|faz sentido|faria sentido|faz diferenca|e pra|e para|e o nosso|e nosso|e o meu|e meu)"
+    r"|(?:nao|nem) (?:acho|creio|sei) (?:se|que)|desnecessari\w*"
+    r"|(?:sem|pouco|nenhum|nenhuma) (?:valor|retorno|ganho|sentido|necessidade|utilidade)"
+    r"|(?:nao|nem) (?:vamos|vou|iamos|ia|vai|iria) (?:\w+ )?(?:usar|utilizar|aproveitar|precisar)"
+    r"|nao (?:e|eh) (?:o )?(?:nosso|meu) (?:caso|foco|perfil|momento))\b")
+_BLOCKING = re.compile(
+    r"\b(?:fica (?:dificil|complicado|inviavel|pesado|puxado)|(?:e|eh|seria) (?:dificil|complicado|inviavel)"
+    r"|(?:nao|nem) (?:da|consigo|conseguimos|tenho como|temos como|vejo como|quero|queremos|posso|podemos|vou"
+    r"|vamos) (?:\w+ ){0,2}?(?:fechar|seguir|avancar|contratar|comprar|trocar|mudar|investir|comecar|entrar|assinar)"
+    r"|(?:nao|nem) (?:fecho|compro|assino|contrato)|(?:so|somente) compro)\b")
+
+
+class _Gate:
+    """A CORROBORATION entry for the gates above (same .search() contract as the stem patterns)."""
+
+    def __init__(self, *checks: Callable[[str], Any]) -> None:
+        self.checks = checks
+
+    def search(self, text: str) -> bool:
+        return any(check(text) for check in self.checks)
+
+
+_STEM_GATES = ("IMPLEMENTATION_INTEGRATION", "AUTHORITY_INTERNAL_BUY_IN")  # the gates from before v1
+CORROBORATION["NEED_VALUE_FIT"] = _Gate(_NEED_RESISTANCE.search, _BLOCKING.search, _attached)
+CORROBORATION["COMPETITION_EXISTING_SOLUTION"] = _Gate(_attached, _NO_SWITCH.search, _NEED_RESISTANCE.search,
+                                                       _BLOCKING.search)
+
+
+def non_objection_guard(objection_text: str) -> str | None:
+    """Why the lead's objection words are not an objection (a REJECTION_REASONS value), or None (go on).
+
+    Runs on the classifier's (or fast path's) candidate before the category normalizations and gates."""
+    text = _fold(objection_text)
+    if _information_request(text) and not _resists(text):
+        return NON_OBJECTION_INFORMATION_REQUEST
+    if _ACCEPTANCE.search(text) and not _resists(_ACCEPTANCE.sub(" ", text)):
+        return NEGATED_RESISTANCE
+    return None
+
+
+def pain_guard(objection_text: str) -> str | None:
+    """PAIN_NOT_OBJECTION when the words describe a pain about today and nothing else resists."""
+    text = _fold(objection_text)
+    if _PAIN.search(text) and not _resists(_PAIN.sub(" ", text)):
+        return PAIN_NOT_OBJECTION
+    return None
+
+
+def screen(category: str, objection_text: str) -> tuple[str, str | None]:
+    """The live policy's deterministic step on one candidate episode: (category, rejection reason or None).
+
+    Order: non-objection guard -> category normalizations (competition, price, authority) -> the stem gates
+    (IMPLEMENTATION, AUTHORITY; their reason unchanged) -> pain guard -> the NEED/COMPETITION gates."""
+    if rejection := non_objection_guard(objection_text):
+        return category, rejection
+    category = authority_override(price_override(competition_override(category, objection_text), objection_text),
+                                  objection_text)
+    gate = CORROBORATION.get(category)
+    uncorroborated = gate is not None and not gate.search(_fold(objection_text))
+    if uncorroborated and category in _STEM_GATES:
+        return category, UNCORROBORATED_CATEGORY
+    return category, pain_guard(objection_text) or (UNCORROBORATED_CATEGORY if uncorroborated else None)
 
 
 @dataclass(frozen=True)
@@ -383,6 +582,10 @@ class LiveSalesSession:
     fast_path_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys(
         ("attempts", "hits", "llm_calls_saved"), 0))
     fast_path_by_category: dict[str, int] = field(default_factory=dict)
+    # Non-objection guard + gates (debug only): candidates seen, rejected (by reason), categories normalized.
+    guard_counters: dict[str, int] = field(default_factory=lambda: dict.fromkeys(
+        ("classifier_candidates", "classifier_guard_rejections", "category_overrides"), 0))
+    guard_rejections_by_reason: dict[str, int] = field(default_factory=dict)
     # Commercial State (see commercial_state.py): facts, extraction high-water mark, technical counters.
     commercial: CommercialState = field(default_factory=CommercialState)
     _last_extracted_seq: int = -1
@@ -705,20 +908,27 @@ class LiveSalesSession:
             return "NO_RECOMMENDATION", "AMBIGUOUS_CATEGORIES"
         episode = candidates[0]
         objection_text = " ".join(seg.text for seg in call.segments if seg.segment_id in episode.objection_segment_ids)
-        category = authority_override(price_override(episode.category, objection_text), objection_text)
+        # Deterministic guard + normalizations + gates on the lead's own words (no LLM; timed as guard_ms).
+        g0 = time.perf_counter()
+        category, rejection = screen(episode.category, objection_text)
+        t["guard_ms"] = round((time.perf_counter() - g0) * 1000, 3)
+        t["category"] = category
+        with self.lock:
+            self.guard_counters["classifier_candidates"] += 1
+            self.guard_counters["category_overrides"] += category != episode.category
+            if rejection:
+                self.guard_counters["classifier_guard_rejections"] += 1
+                self.guard_rejections_by_reason[rejection] = self.guard_rejections_by_reason.get(rejection, 0) + 1
         if category != episode.category:
             t["category_before"] = episode.category
             self._dbg("CLASSIFIER", category_normalized=f"{episode.category} -> {category}",
-                      reason=("explicit price words" if category == "PRICE_BUDGET"
-                              else "explicit third-party decision dependency") + " in the objection evidence")
+                      reason={"PRICE_BUDGET": "explicit price words",
+                              "COMPETITION_EXISTING_SOLUTION": "explicit attachment to the current solution"}.get(
+                          category, "explicit third-party decision dependency") + " in the objection evidence")
             episode = dataclasses.replace(episode, category=category)
-        cues = CORROBORATION.get(episode.category)
-        if cues:
-            said = " ".join(_fold(seg.text) for seg in call.segments if seg.segment_id in episode.objection_segment_ids)
-            if not cues.search(said):
-                t["category"] = episode.category
-                return "NO_RECOMMENDATION", "UNCORROBORATED_CATEGORY"
-        t["category"] = episode.category
+        if rejection:  # fail-closed and observable: the proposed category stays in the timing
+            self._dbg("POLICY", guard=rejection, category=category)
+            return "NO_RECOMMENDATION", rejection
         # The engine's own decision feeds the Commercial State (never re-classified there).
         self._record([objection_event(episode.category, episode.objection_segment_ids)], call)
         current = self.current()
@@ -847,6 +1057,17 @@ class LiveSalesSession:
         except Exception as exc:  # noqa: BLE001 - never kill the worker: objection analysis shares it
             events, rejected = [], []
             t.update(outcome="ERROR", error_type="OTHER", error_detail=f"{type(exc).__name__}: {exc}"[:200])
+        # A buying question (the OP-14 lexical signal) is a buying signal even when the model filed it only as a
+        # commercial term ("Pode pagar no cartão da empresa?"); deterministic, the lead's own words, and only on
+        # lines where the model recorded no buying signal itself.
+        cited = {i for e in events if e.event_type == "BUYING_SIGNAL_DETECTED" for i in e.segment_ids}
+        lexical = [CommercialEvent("BUYING_SIGNAL_DETECTED", v, (sid,), "lead", "OBSERVED")
+                   for u in new if (sid := self._sid(u.sequence)) not in cited
+                   and (v := live_signals.buying_signal_value(u.text))]
+        if lexical:
+            self._record(lexical, call)
+            events = [*events, *lexical]
+            t["lexical_buying_signals"] = len(lexical)
         t["latency_ms"] = _ms(self.clock() - started)
         t.update(usage=_usage(self.provider))
         with self.lock:

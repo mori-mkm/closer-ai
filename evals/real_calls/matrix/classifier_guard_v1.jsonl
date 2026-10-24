@@ -1,0 +1,174 @@
+{"meeting_id": "MX-PRICE-01", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-01", "speaker": "Lead", "role": "lead", "text": "Está muito acima do que tínhamos reservado.", "sequence": 2}
+{"meeting_id": "MX-PRICE-02", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-02", "speaker": "Lead", "role": "lead", "text": "Achei caro demais para o nosso tamanho.", "sequence": 2}
+{"meeting_id": "MX-PRICE-03", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-03", "speaker": "Lead", "role": "lead", "text": "Não cabe no orçamento deste ano.", "sequence": 2}
+{"meeting_id": "MX-PRICE-04", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-04", "speaker": "Lead", "role": "lead", "text": "Não tenho verba para isso agora.", "sequence": 2}
+{"meeting_id": "MX-PRICE-05", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-05", "speaker": "Lead", "role": "lead", "text": "Esse valor pesa demais no nosso caixa.", "sequence": 2}
+{"meeting_id": "MX-PRICE-06", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-06", "speaker": "Lead", "role": "lead", "text": "Por que está tão caro?", "sequence": 2}
+{"meeting_id": "MX-PRICE-07", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-07", "speaker": "Lead", "role": "lead", "text": "Como eu vou pagar esse valor todo mês?", "sequence": 2}
+{"meeting_id": "MX-PRICE-08", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-08", "speaker": "Lead", "role": "lead", "text": "Você não acha 63 mil muito caro?", "sequence": 2}
+{"meeting_id": "MX-PRICE-09", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-PRICE-09", "speaker": "Lead", "role": "lead", "text": "Não achei barato, para ser sincero.", "sequence": 2}
+{"meeting_id": "MX-AUTHORITY-01", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-AUTHORITY-01", "speaker": "Lead", "role": "lead", "text": "Precisa passar pelo conselho antes de qualquer coisa.", "sequence": 2}
+{"meeting_id": "MX-AUTHORITY-02", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-AUTHORITY-02", "speaker": "Lead", "role": "lead", "text": "Preciso falar com meu sócio antes de fechar.", "sequence": 2}
+{"meeting_id": "MX-AUTHORITY-03", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-AUTHORITY-03", "speaker": "Lead", "role": "lead", "text": "Não posso decidir isso sozinho.", "sequence": 2}
+{"meeting_id": "MX-AUTHORITY-04", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-AUTHORITY-04", "speaker": "Lead", "role": "lead", "text": "Compra desse valor depende do comitê de investimentos.", "sequence": 2}
+{"meeting_id": "MX-AUTHORITY-05", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-AUTHORITY-05", "speaker": "Lead", "role": "lead", "text": "Sem a assinatura da diretoria eu não consigo avançar.", "sequence": 2}
+{"meeting_id": "MX-AUTHORITY-06", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-AUTHORITY-06", "speaker": "Lead", "role": "lead", "text": "Meu chefe precisa aprovar antes da gente seguir.", "sequence": 2}
+{"meeting_id": "MX-AUTHORITY-07", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-AUTHORITY-07", "speaker": "Lead", "role": "lead", "text": "Tenho que validar com o financeiro antes de assinar.", "sequence": 2}
+{"meeting_id": "MX-DISCOVERY-01", "speaker": "Closer", "role": "closer", "text": "Quem participa da decisão?", "sequence": 1}
+{"meeting_id": "MX-DISCOVERY-01", "speaker": "Lead", "role": "lead", "text": "Meu diretor participa.", "sequence": 2}
+{"meeting_id": "MX-DISCOVERY-02", "speaker": "Closer", "role": "closer", "text": "Quem participa da decisão?", "sequence": 1}
+{"meeting_id": "MX-DISCOVERY-02", "speaker": "Lead", "role": "lead", "text": "Sim, meu sócio participa.", "sequence": 2}
+{"meeting_id": "MX-DISCOVERY-03", "speaker": "Closer", "role": "closer", "text": "Quem participa da decisão?", "sequence": 1}
+{"meeting_id": "MX-DISCOVERY-03", "speaker": "Lead", "role": "lead", "text": "Eu e meu diretor decidimos juntos.", "sequence": 2}
+{"meeting_id": "MX-DISCOVERY-04", "speaker": "Closer", "role": "closer", "text": "Quem participa da decisão?", "sequence": 1}
+{"meeting_id": "MX-DISCOVERY-04", "speaker": "Lead", "role": "lead", "text": "A minha sócia também vai olhar.", "sequence": 2}
+{"meeting_id": "MX-IMPLEMENTATION-01", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-IMPLEMENTATION-01", "speaker": "Lead", "role": "lead", "text": "Sem alguém dedicado para implantar, não consigo seguir.", "sequence": 2}
+{"meeting_id": "MX-IMPLEMENTATION-02", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-IMPLEMENTATION-02", "speaker": "Lead", "role": "lead", "text": "Não temos equipe para fazer essa migração agora.", "sequence": 2}
+{"meeting_id": "MX-IMPLEMENTATION-03", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-IMPLEMENTATION-03", "speaker": "Lead", "role": "lead", "text": "A integração com o nosso ERP não funciona, já testamos.", "sequence": 2}
+{"meeting_id": "MX-IMPLEMENTATION-04", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-IMPLEMENTATION-04", "speaker": "Lead", "role": "lead", "text": "Quem tocaria essa implantação? Aqui ninguém tem tempo para isso.", "sequence": 2}
+{"meeting_id": "MX-IMPLEMENTATION-05", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-IMPLEMENTATION-05", "speaker": "Lead", "role": "lead", "text": "Treinar quarenta pessoas no sistema novo é inviável para nós.", "sequence": 2}
+{"meeting_id": "MX-IMPLEMENTATION-06", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-IMPLEMENTATION-06", "speaker": "Lead", "role": "lead", "text": "A migração dos dados antigos vai parar a operação, e isso não dá.", "sequence": 2}
+{"meeting_id": "MX-IMPLEMENTATION-07", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-IMPLEMENTATION-07", "speaker": "Lead", "role": "lead", "text": "Configurar tudo isso no meio da safra não tem como.", "sequence": 2}
+{"meeting_id": "MX-COMPETITION-01", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-COMPETITION-01", "speaker": "Lead", "role": "lead", "text": "A equipe domina o sistema atual e não vamos trocar.", "sequence": 2}
+{"meeting_id": "MX-COMPETITION-02", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-COMPETITION-02", "speaker": "Lead", "role": "lead", "text": "Estamos bem com o que temos hoje.", "sequence": 2}
+{"meeting_id": "MX-COMPETITION-03", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-COMPETITION-03", "speaker": "Lead", "role": "lead", "text": "Já usamos outra ferramenta que atende e não queremos mudar.", "sequence": 2}
+{"meeting_id": "MX-COMPETITION-04", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-COMPETITION-04", "speaker": "Lead", "role": "lead", "text": "O nosso fornecedor atual resolve, não vejo motivo para sair dele.", "sequence": 2}
+{"meeting_id": "MX-COMPETITION-05", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-COMPETITION-05", "speaker": "Lead", "role": "lead", "text": "A gente roda nesse sistema há dez anos, não vou largar dele agora.", "sequence": 2}
+{"meeting_id": "MX-COMPETITION-06", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-COMPETITION-06", "speaker": "Lead", "role": "lead", "text": "O sistema que usamos já faz isso e o pessoal está acostumado.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-01", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-01", "speaker": "Lead", "role": "lead", "text": "Não vejo necessidade disso.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-02", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-02", "speaker": "Lead", "role": "lead", "text": "Isso não resolve meu problema.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-03", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-03", "speaker": "Lead", "role": "lead", "text": "Não sei se isso faz sentido para a gente.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-04", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-04", "speaker": "Lead", "role": "lead", "text": "Não acho que vamos usar.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-05", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-05", "speaker": "Lead", "role": "lead", "text": "Não vejo valor nisso para o nosso tamanho.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-06", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-06", "speaker": "Lead", "role": "lead", "text": "Para o nosso volume não compensa.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-07", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-07", "speaker": "Lead", "role": "lead", "text": "Sinceramente, não é o nosso caso.", "sequence": 2}
+{"meeting_id": "MX-NEED_VALUE-08", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEED_VALUE-08", "speaker": "Lead", "role": "lead", "text": "Não preciso disso e ainda está caro.", "sequence": 2}
+{"meeting_id": "MX-TIMING-01", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-TIMING-01", "speaker": "Lead", "role": "lead", "text": "Agora não é o momento, talvez no próximo trimestre.", "sequence": 2}
+{"meeting_id": "MX-TIMING-02", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-TIMING-02", "speaker": "Lead", "role": "lead", "text": "Só depois da colheita a gente consegue pensar nisso.", "sequence": 2}
+{"meeting_id": "MX-TIMING-03", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-TIMING-03", "speaker": "Lead", "role": "lead", "text": "Este ano não dá, estamos com outra prioridade.", "sequence": 2}
+{"meeting_id": "MX-TIMING-04", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-TIMING-04", "speaker": "Lead", "role": "lead", "text": "Volta a falar comigo em março.", "sequence": 2}
+{"meeting_id": "MX-TIMING-05", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-TIMING-05", "speaker": "Lead", "role": "lead", "text": "Antes de setembro a gente não consegue começar nada.", "sequence": 2}
+{"meeting_id": "MX-TIMING-06", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-TIMING-06", "speaker": "Lead", "role": "lead", "text": "Estamos no meio de uma mudança, deixa para o ano que vem.", "sequence": 2}
+{"meeting_id": "MX-PAIN-01", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-01", "speaker": "Lead", "role": "lead", "text": "Tudo depende de mim.", "sequence": 2}
+{"meeting_id": "MX-PAIN-02", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-02", "speaker": "Lead", "role": "lead", "text": "Fazemos tudo manualmente.", "sequence": 2}
+{"meeting_id": "MX-PAIN-03", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-03", "speaker": "Lead", "role": "lead", "text": "A equipe perde muito tempo com planilha.", "sequence": 2}
+{"meeting_id": "MX-PAIN-04", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-04", "speaker": "Lead", "role": "lead", "text": "Nem sei minha margem por cabeça.", "sequence": 2}
+{"meeting_id": "MX-PAIN-05", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-05", "speaker": "Lead", "role": "lead", "text": "Tenho dificuldade para controlar custos.", "sequence": 2}
+{"meeting_id": "MX-PAIN-06", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-06", "speaker": "Lead", "role": "lead", "text": "Meu gerente não decide nada sem mim.", "sequence": 2}
+{"meeting_id": "MX-PAIN-07", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-07", "speaker": "Lead", "role": "lead", "text": "Hoje tudo depende de mim na fazenda.", "sequence": 2}
+{"meeting_id": "MX-PAIN-08", "speaker": "Closer", "role": "closer", "text": "Como funciona a rotina hoje?", "sequence": 1}
+{"meeting_id": "MX-PAIN-08", "speaker": "Lead", "role": "lead", "text": "A gente perde bastante tempo fechando o mês.", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-01", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-01", "speaker": "Lead", "role": "lead", "text": "Quanto custa?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-02", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-02", "speaker": "Lead", "role": "lead", "text": "Qual é o valor?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-03", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-03", "speaker": "Lead", "role": "lead", "text": "E no anual sai por quanto?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-04", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-04", "speaker": "Lead", "role": "lead", "text": "Quanto fica para cinco usuários?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-05", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-05", "speaker": "Lead", "role": "lead", "text": "Qual a diferença para o sistema que usamos?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-06", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-06", "speaker": "Lead", "role": "lead", "text": "Vocês integram com o nosso ERP?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-07", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-07", "speaker": "Lead", "role": "lead", "text": "Vocês têm algum cliente do nosso tamanho usando?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-08", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-08", "speaker": "Lead", "role": "lead", "text": "Como funciona o suporte?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-09", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-09", "speaker": "Lead", "role": "lead", "text": "Quanto tempo leva a implantação?", "sequence": 2}
+{"meeting_id": "MX-INFORMATION-10", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-INFORMATION-10", "speaker": "Lead", "role": "lead", "text": "Quem faz a implantação?", "sequence": 2}
+{"meeting_id": "MX-BUYING-01", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-01", "speaker": "Lead", "role": "lead", "text": "Pode pagar no cartão da empresa?", "sequence": 2}
+{"meeting_id": "MX-BUYING-02", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-02", "speaker": "Lead", "role": "lead", "text": "Quando eu começo?", "sequence": 2}
+{"meeting_id": "MX-BUYING-03", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-03", "speaker": "Lead", "role": "lead", "text": "Como faço para entrar?", "sequence": 2}
+{"meeting_id": "MX-BUYING-04", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-04", "speaker": "Lead", "role": "lead", "text": "Quando é o próximo encontro?", "sequence": 2}
+{"meeting_id": "MX-BUYING-05", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-05", "speaker": "Lead", "role": "lead", "text": "Como funciona o onboarding?", "sequence": 2}
+{"meeting_id": "MX-BUYING-06", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-06", "speaker": "Lead", "role": "lead", "text": "Se eu fechar hoje, quando começo?", "sequence": 2}
+{"meeting_id": "MX-BUYING-07", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-07", "speaker": "Lead", "role": "lead", "text": "Vocês parcelam?", "sequence": 2}
+{"meeting_id": "MX-BUYING-08", "speaker": "Closer", "role": "closer", "text": "Ficou alguma dúvida?", "sequence": 1}
+{"meeting_id": "MX-BUYING-08", "speaker": "Lead", "role": "lead", "text": "Pode pagar no cartão?", "sequence": 2}
+{"meeting_id": "MX-NEGATION-01", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-01", "speaker": "Lead", "role": "lead", "text": "Não achei caro.", "sequence": 2}
+{"meeting_id": "MX-NEGATION-02", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-02", "speaker": "Lead", "role": "lead", "text": "Não está caro.", "sequence": 2}
+{"meeting_id": "MX-NEGATION-03", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-03", "speaker": "Lead", "role": "lead", "text": "O preço não é problema.", "sequence": 2}
+{"meeting_id": "MX-NEGATION-04", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-04", "speaker": "Lead", "role": "lead", "text": "O valor está ok.", "sequence": 2}
+{"meeting_id": "MX-NEGATION-05", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-05", "speaker": "Lead", "role": "lead", "text": "Está dentro do orçamento.", "sequence": 2}
+{"meeting_id": "MX-NEGATION-06", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-06", "speaker": "Lead", "role": "lead", "text": "Cabe no orçamento.", "sequence": 2}
+{"meeting_id": "MX-NEGATION-07", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-07", "speaker": "Lead", "role": "lead", "text": "Hoje o orçamento comporta.", "sequence": 2}
+{"meeting_id": "MX-NEGATION-08", "speaker": "Closer", "role": "closer", "text": "O que você achou da proposta?", "sequence": 1}
+{"meeting_id": "MX-NEGATION-08", "speaker": "Lead", "role": "lead", "text": "Não é questão de preço, gostei bastante.", "sequence": 2}
+{"meeting_id": "MX-NEUTRAL-01", "speaker": "Closer", "role": "closer", "text": "Me conta um pouco de vocês.", "sequence": 1}
+{"meeting_id": "MX-NEUTRAL-01", "speaker": "Lead", "role": "lead", "text": "Hoje temos cinco pessoas no time.", "sequence": 2}
+{"meeting_id": "MX-NEUTRAL-02", "speaker": "Closer", "role": "closer", "text": "Me conta um pouco de vocês.", "sequence": 1}
+{"meeting_id": "MX-NEUTRAL-02", "speaker": "Lead", "role": "lead", "text": "Trabalhamos com gado de corte há vinte anos.", "sequence": 2}
+{"meeting_id": "MX-NEUTRAL-03", "speaker": "Closer", "role": "closer", "text": "Me conta um pouco de vocês.", "sequence": 1}
+{"meeting_id": "MX-NEUTRAL-03", "speaker": "Lead", "role": "lead", "text": "Entendi, faz sentido o que você falou.", "sequence": 2}
+{"meeting_id": "MX-NEUTRAL-04", "speaker": "Closer", "role": "closer", "text": "Me conta um pouco de vocês.", "sequence": 1}
+{"meeting_id": "MX-NEUTRAL-04", "speaker": "Lead", "role": "lead", "text": "Gostei da apresentação.", "sequence": 2}
+{"meeting_id": "MX-NEUTRAL-05", "speaker": "Closer", "role": "closer", "text": "Me conta um pouco de vocês.", "sequence": 1}
+{"meeting_id": "MX-NEUTRAL-05", "speaker": "Lead", "role": "lead", "text": "A fazenda fica a duas horas da cidade.", "sequence": 2}
+{"meeting_id": "MX-NEUTRAL-06", "speaker": "Closer", "role": "closer", "text": "Me conta um pouco de vocês.", "sequence": 1}
+{"meeting_id": "MX-NEUTRAL-06", "speaker": "Lead", "role": "lead", "text": "Usamos planilha para quase tudo.", "sequence": 2}

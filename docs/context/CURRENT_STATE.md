@@ -170,3 +170,11 @@ inspetores FP/FN; EVAL_REPORT.md; `--compare`, `--rescore`, `--resume`). Contrat
 [`evals/real_calls/`](../../evals/real_calls/README.md); suíte de regressões conhecidas + kit sintético (lido
 in place, referência ≠ gold). Só medição: nenhum comportamento de produção mudou. Calls reais: nenhuma no
 repo e processamento ainda bloqueado por autorização.
+**Classifier Quality v1** (branch `fix/classifier-quality-v1`): etapa determinística antes de aceitar uma
+objeção (`screen` em `live/session.py`): non-objection guard (pergunta informativa, preço negado/orçamento
+positivo, dor atual → `NON_OBJECTION_INFORMATION_REQUEST` / `NEGATED_RESISTANCE` / `PAIN_NOT_OBJECTION`),
+normalizações PRICE/COMPETITION sobre NEED_VALUE_FIT, gates para NEED_VALUE_FIT e COMPETITION, cues de
+AUTHORITY (conselho, assinatura) e IMPLEMENTATION (quem tocaria, alguém dedicado) ampliados; buying question
+→ `buying_signals` no Commercial State (léxico OP-14); 2 linhas no prompt LIVE TARGET. Matriz sintética de 87
+casos em `evals/real_calls/matrix/`. Run qwen3:8b do candidate interrompido por falta de RAM em 11/19 calls;
+nas mesmas 11 calls: precision 0.643 → 0.923, recall 0.692 → 0.923.

@@ -105,7 +105,11 @@ did something. It never pre-fills an expectation.
 
 - **Error patterns** are heuristic labels for review: NEGATION, PAIN_AS_OBJECTION,
   DISCOVERY_AS_OBJECTION, CONTEXT_LEAK, STALE_OBJECTION, MISSED_BUYING_SIGNAL,
-  MISSED_DECISION_DEPENDENCY, COALESCED_LINE, TOO_SHORT and others.
+  MISSED_DECISION_DEPENDENCY, TOO_SHORT, GUIDANCE_FAILED (the objection was detected but its guidance failed
+  closed, so another card or none was shown) and others.
+- **A coalesced line** (said while an analysis ran, then replaced by a newer lead line) is not lost: the next
+  analysis reads every new lead line as a target. A miss there is `MODEL_FN_IN_BATCH` (the model or a gate
+  missed it in that batch); `PIPELINE_COALESCED` means no analysis ever read it.
 - **Inspectors:** `false_positives.jsonl` and `false_negatives.jsonl` hold, per error, the text, the
   previous 5 utterances, what the engine did (category, source, outcome, recommendation), the Commercial
   State and the opportunities at that moment.

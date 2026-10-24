@@ -238,15 +238,22 @@ def test_seller_action_metrics_and_stale_cards():
 # --- known regressions, patterns, report, compare ---------------------------------------------------
 
 def test_known_failures_are_tracked_not_hidden(monkeypatch):
+    from closer_ai.live import session as live_session
     monkeypatch.setitem(SCRIPT, "Não achei caro.", "PRICE_BUDGET")  # the classifier's known mistake
     monkeypatch.setitem(SCRIPT, "Mas preciso falar com ele antes de fechar.", "AUTHORITY_INTERNAL_BUY_IN")
     calls = ev.load_calls(ev.FIXTURES)
-    _, _, m = _run(calls, annotations=em.load_annotations([ev.FIXTURES], []))
+    with monkeypatch.context() as mp:  # the engine before Classifier Quality v1: no non-objection guard
+        mp.setattr(live_session, "non_objection_guard", lambda text: None)
+        _, _, m = _run(calls, annotations=em.load_annotations([ev.FIXTURES], []))
     status = {r["case"]: r["status"] for r in m["known_regressions"]}
     assert status["KR-NEGATED-PRICE"] == "KNOWN_FAILURE"
     assert status["KR-AUTHORITY-BLOCKER"] == "PASS"
     assert status["KR-STALE-AUTHORITY"] == "PASS"  # the AUTHORITY card never comes back
     assert m["confusion_report"]["NEGATION"] == 1
+    # the guard rejects the same classifier mistake: the mark is reported for removal
+    _, _, m = _run({"KR-NEGATED-PRICE": calls["KR-NEGATED-PRICE"]},
+                   annotations=em.load_annotations([ev.FIXTURES], []))
+    assert m["known_regressions"][0]["status"] == "UNEXPECTED_PASS"
     monkeypatch.delitem(SCRIPT, "Não achei caro.")
     _, _, m = _run({"KR-NEGATED-PRICE": calls["KR-NEGATED-PRICE"]},
                    annotations=em.load_annotations([ev.FIXTURES], []))
@@ -296,3 +303,37 @@ def test_an_interrupted_run_keeps_finished_calls_and_can_be_rescored(tmp_path):
     assert cfg["not_replayed"] == ["b"] and cfg["calls"] == ["a"]
     assert (m["objections"]["tp"], m["objections"]["fn"]) == (1, 0)
     assert (out / "EVAL_REPORT.md").exists()
+
+
+def test_coalesced_and_guidance_failure_patterns_and_guard_rejections():
+    fn = {"dimension": "objection", "kind": "FN", "expected": "PRICE_BUDGET"}
+    # a coalesced line is read by the next analysis as a target: a miss there is the model's (or a gate's)
+    assert em.pattern(fn, {"analyzed": "COALESCED", "covered_by": {"sequence": 8}}) == "MODEL_FN_IN_BATCH"
+    assert em.pattern(fn, {"analyzed": "COALESCED", "covered_by": None}) == "PIPELINE_COALESCED"
+    card = {"dimension": "seller_action", "kind": "WRONG_CARD"}
+    assert em.pattern(card, {"objection": {"reason": "GUIDANCE_INVALID_RESPONSE"}}) == "GUIDANCE_FAILED"
+    assert em.pattern(card, {"objection": {"reason": "GUIDED"}}) == "WRONG_CARD"
+    for reason in ("NON_OBJECTION_INFORMATION_REQUEST", "NEGATED_RESISTANCE", "PAIN_NOT_OBJECTION",
+                   "UNCORROBORATED_CATEGORY"):
+        assert not ev.detected({"category": "PRICE_BUDGET", "reason": reason})
+    assert ev.detected({"category": "PRICE_BUDGET", "reason": "GUIDANCE_INVALID_RESPONSE"})
+
+
+def test_two_labeled_episodes_of_the_same_category_are_not_a_duplicate_card():
+    def card(seq, rid, t):
+        return {"kind": "utterance", "meeting_id": "m", "sequence": seq, "segment_id": f"seg_{seq}", "visible_at": t,
+                "recommendation": {"category": "TIMING_PRIORITY"},
+                "seller_action": {"source": "OBJECTION", "source_id": f"rec:{rid}"}}
+
+    def analysis(seq, rid):
+        return {"kind": "analysis", "meeting_id": "m", "sequence": seq, "visible_at": 0.0, "seller_action": None,
+                "timing": {"recommendation_id": rid, "target_segment_ids": [f"seg_{seq}"]}}
+
+    trace = [card(2, 1, 10.0), analysis(2, 1), card(8, 2, 50.0), analysis(8, 2)]
+    two = {"m": [{"meeting_id": "m", "sequence": 2, "expected_objection": {"present": True, "category": "TIMING_PRIORITY"}},
+                 {"meeting_id": "m", "sequence": 8, "expected_objection": {"present": True, "category": "TIMING_PRIORITY"}}]}
+    assert em.seller_metrics({}, two, trace, [])["duplicate_card"] == 0
+    one = {"m": [{"meeting_id": "m", "sequence": 2, "accept_at": [8],
+                  "expected_objection": {"present": True, "category": "TIMING_PRIORITY"}}]}
+    assert em.seller_metrics({}, one, trace, [])["duplicate_card"] == 1  # the same episode shown twice
+    assert em.seller_metrics({}, {}, trace, [])["duplicate_card"] == 1  # unlabeled: still counted

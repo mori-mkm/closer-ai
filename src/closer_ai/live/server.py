@@ -276,6 +276,8 @@ class Runtime:
                              "seller_actions_from_opportunity": sum(v == "OPPORTUNITY"
                                                                     for v in s.seller_actions_shown.values()),
                              "fast_path": {**s.fast_path_counters, "by_category": dict(s.fast_path_by_category)},
+                             "classifier_guard": {**s.guard_counters,
+                                                  "guard_rejections_by_reason": dict(s.guard_rejections_by_reason)},
                              "model_state": self.model_state,
                              "recommendation_state": (s.current_recommendation.state
                                                       if s.current_recommendation else "NONE")}

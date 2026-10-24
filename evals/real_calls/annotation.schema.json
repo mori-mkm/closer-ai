@@ -9,7 +9,7 @@
   "properties": {
     "meeting_id": {"type": "string"},
     "sequence": {"type": "integer"},
-    "source": {"enum": ["human", "calibration_reference", "synthetic_fixture"]},
+    "source": {"enum": ["human", "calibration_reference", "synthetic_fixture", "synthetic_matrix"]},
     "annotator": {"type": "string"},
     "notes": {"type": "string"},
     "scope": {

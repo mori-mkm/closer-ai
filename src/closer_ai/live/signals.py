@@ -237,6 +237,19 @@ PROGRAM_BLOCKS = {"pillars": re.compile(r"\b(?:lucro incontestavel|fazenda auton
                                             r"|encontros? online)\b")}
 
 
+def buying_signal_value(text: str) -> str | None:
+    """A lead line's BUYING_QUESTION as a Commercial State value: the lead's sentence that asks it (exact
+    words, at most 10), else the matched words; None when the line asks none. Classifier Quality v1: the facts
+    model stored "Pode pagar no cartão da empresa?" as a commercial term only, while OP-14 saw the buying
+    question; the same lexical signal now also records it as a buying signal."""
+    rx = LEAD["BUYING_QUESTION"]
+    for sentence in re.split(r"(?<=[.?!])\s+", text):
+        if m := rx.search(fold(sentence)):
+            value = sentence.strip(" .,!?;:")
+            return value if len(value.split()) <= 10 else m.group(0)
+    return None
+
+
 _DECISION_QUESTION = re.compile(
     r"\b(?:quem (?:mais )?(?:participa|decide|assina|aprova|bate o martelo|vai decidir|esta envolvido"
     r"|precisa (?:concordar|aprovar))|alguem (?:mais )?participa)\b")
