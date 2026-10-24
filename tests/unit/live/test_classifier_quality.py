@@ -136,6 +136,29 @@ def test_implementation_blocker_passes_a_question_about_it_does_not():
     assert screen(I, "Quem faz a implantação?") == (I, "NON_OBJECTION_INFORMATION_REQUEST")
 
 
+@pytest.mark.parametrize("text", [
+    "Treinar a equipe em sistema novo sempre dá um trabalhinho, né.", "Treinar a equipe dá um trabalhinho.",
+    "Quem faz a implantação?", "Como funciona o onboarding?", "Quanto tempo leva a implantação?"])
+def test_an_implementation_topic_is_not_an_implementation_blocker(text):
+    assert screen(I, text)[1] is not None
+
+
+@pytest.mark.parametrize("text", [
+    "Não temos equipe para implantar isso.", "Sem alguém dedicado não consigo seguir.",
+    "A integração não funciona com o sistema que usamos.", "Não temos como fazer essa migração agora."])
+def test_an_implementation_blocker_resists(text):
+    assert screen(I, text) == (I, None)
+
+
+def test_a_cash_flow_barrier_is_price_a_postponement_stays_timing():
+    T = "TIMING_PRIORITY"
+    assert screen(T, "Pagar o ano todo adiantado não cabe no nosso fluxo de caixa.") == (P, None)
+    assert screen(T, "Não cabe no orçamento.") == (P, None)
+    for line in ("Agora não, talvez depois da safra.", "Está caro agora, deixa para o ano que vem.",
+                 "Por enquanto não cabe no caixa, mais para frente a gente vê."):
+        assert screen(T, line) == (T, None), line
+
+
 def test_negated_price_is_never_fast_pathed():
     for line in ("Não achei caro.", "Não está caro.", "O preço não é problema.", "Hoje o orçamento comporta."):
         assert fast_path_category(line) is None

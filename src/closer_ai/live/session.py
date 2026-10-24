@@ -104,17 +104,19 @@ def _first_sentence(text: str) -> str:
 
 # Emission gate for categories measured to over-detect live (benchmark + live probe, Oct 2026): the
 # lead's own words must mention putting the solution in place. Without it ("a gente perde tempo com
-# isso" = pain, not resistance) the episode is not shown.
+# isso" = pain, not resistance) the episode is not shown. Classifier Quality v1 (CAL03: "Treinar a equipe em
+# sistema novo sempre dá um trabalhinho, né." passed on "treina"): the topic alone is not a blocker, the same
+# words must also resist (`_resists`, below): "não temos equipe", "inviável", "ninguém tem tempo", "safra".
 # ponytail: stem list, misses paraphrases (recall ceiling); replace with a measured precision fix.
-CORROBORATION: dict[str, re.Pattern[str]] = {  # matched on the accent-folded objection words
-    "IMPLEMENTATION_INTEGRATION": re.compile("|".join(map(re.escape, (
+_IMPLEMENTATION_TOPIC = re.compile("|".join(map(re.escape, (
         "implant", "implement", "integr", "instal", "configur", "migr", "treina", "aplicar", "tocar isso",
         "gente pra", "equipe pra", "equipe nao", "formato", "presencial", "adapt",
         # Classifier Quality v1 (CAL09: "Quem tocaria essa troca? ... sem alguém dedicado a isso, não tenho
         # como seguir." was dropped): who would run it / no one free to run it
         "tocaria", "quem vai tocar", "dedicad", "no limite", "nao sobra ninguem", "nao temos gente",
-        "nao tenho gente", "nao temos equipe", "nao tenho equipe", "nao temos pessoal")))),
-}  # + AUTHORITY_INTERNAL_BUY_IN, NEED_VALUE_FIT and COMPETITION_EXISTING_SOLUTION, below
+        "nao tenho gente", "nao temos equipe", "nao tenho equipe", "nao temos pessoal"))))
+# category -> gate with .search(), matched on the accent-folded objection words (filled below)
+CORROBORATION: dict[str, Any] = {}
 
 
 # Live category normalization (real Meet, Oct 2026): after noise and a pain line, E1 labeled "Gostei da
@@ -128,23 +130,29 @@ _PRICE_WORDS = re.compile(r"\b(caro|caros|carissim[oa]s?|preco|precos|orcamento|
 _NEED_DENIAL = re.compile(r"\b(nao (preciso|precisamos|resolve|serve|faz sentido|vejo valor|compensa|vale)"
                           r"|desnecessari\w*)\b")
 # Classifier Quality v1 (CAL11: "Pagar o ano todo adiantado não cabe no nosso fluxo de caixa." came as
-# IMPLEMENTATION_INTEGRATION, then dropped by its gate): a money barrier stated outright. Stronger than
-# _PRICE_WORDS: it moves IMPLEMENTATION_INTEGRATION only when that category's own gate finds nothing.
+# IMPLEMENTATION_INTEGRATION, then dropped by its gate, and as TIMING_PRIORITY in another run): a money
+# barrier stated outright. Stronger than _PRICE_WORDS: it moves IMPLEMENTATION_INTEGRATION only when nothing is
+# about putting it in place, and TIMING_PRIORITY only when nothing postpones ("agora não, depois da safra").
 _PRICE_STANCE = re.compile(
     r"\b(?:caro|caros|carissim\w*|nao cabe no (?:\w+ ){0,2}(?:orcamento|fluxo de caixa|caixa|bolso)"
     r"|(?:nao|nem) (?:tenho|temos) (?:\w+ )?(?:orcamento|verba|dinheiro|caixa)|pesa\w* (?:demais|muito|no bolso|no caixa)"
     r"|acima do (?:\w+ )?(?:orcamento|esperado|que)|reservad\w* (?:bem )?menos|encarec\w*|fluxo de caixa)\b")
+_POSTPONE = re.compile(r"\b(?:agora nao|nao agora|nao e o momento|depois|mais (?:pra|para) frente|por enquanto"
+                       r"|futuramente|daqui a)\b")
 
 
 def price_override(category: str | None, objection_text: str) -> str | None:
     """PRICE_BUDGET when NEED_VALUE_FIT rests on explicit price words alone (negated ones removed first: "não é
     questão de custo"), or when IMPLEMENTATION_INTEGRATION has a money barrier and nothing about putting it in
-    place; otherwise the category unchanged."""
+    place, or when TIMING_PRIORITY has a money barrier and no postponement; otherwise the category unchanged."""
     text = _ACCEPTANCE.sub(" ", _fold(objection_text))
     if category == "NEED_VALUE_FIT" and _PRICE_WORDS.search(text) and not _NEED_DENIAL.search(text):
         return "PRICE_BUDGET"
     if (category == "IMPLEMENTATION_INTEGRATION" and _PRICE_STANCE.search(text)
-            and not CORROBORATION["IMPLEMENTATION_INTEGRATION"].search(text)):
+            and not _IMPLEMENTATION_TOPIC.search(text)):
+        return "PRICE_BUDGET"
+    if (category == "TIMING_PRIORITY" and _PRICE_STANCE.search(text)
+            and not (_POSTPONE.search(text) or _TIME_MARKER.search(text))):
         return "PRICE_BUDGET"
     return category
 
@@ -296,7 +304,7 @@ REJECTION_REASONS = (NON_OBJECTION_INFORMATION_REQUEST, NEGATED_RESISTANCE, PAIN
 # Any sign of resistance: a negation or contrast, a money/difficulty/risk word, a worried "e se..." question
 # (not "e se eu pagar..."), or "como eu vou pagar". Broad on purpose: it only ever keeps an episode.
 _RESISTANCE = re.compile(
-    r"\b(?:nao|nem|nunca|sem(?! juros)|mas|porem|so que|contudo|entretanto"
+    r"\b(?:nao|nem|nunca|ninguem|nenhum\w*|sem(?! juros)|mas|porem|so que|contudo|entretanto"
     r"|caro|cara|caros|caras|carissim\w*|salgad\w*|pesad\w*|pesa|pesando|puxad\w*|apertad\w*|demais|acima|demor\w*"
     r"|dificil|complicad\w*|inviavel|impossivel|problema|preocup\w*|receio|medo|risco|arrisc\w*|duvida"
     r"|encarec\w*|reservad\w*|fluxo de caixa|arrum\w*"
@@ -385,6 +393,7 @@ class _Gate:
 
 
 _STEM_GATES = ("IMPLEMENTATION_INTEGRATION", "AUTHORITY_INTERNAL_BUY_IN")  # the gates from before v1
+CORROBORATION["IMPLEMENTATION_INTEGRATION"] = _Gate(lambda t: bool(_IMPLEMENTATION_TOPIC.search(t)) and _resists(t))
 CORROBORATION["NEED_VALUE_FIT"] = _Gate(_NEED_RESISTANCE.search, _BLOCKING.search, _attached)
 CORROBORATION["COMPETITION_EXISTING_SOLUTION"] = _Gate(_attached, _NO_SWITCH.search, _NEED_RESISTANCE.search,
                                                        _BLOCKING.search)
