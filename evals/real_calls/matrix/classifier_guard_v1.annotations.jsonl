@@ -1,0 +1,174 @@
+{"meeting_id": "MX-PRICE-01", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-01", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-02", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-02", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-03", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-03", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-04", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-04", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-05", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-05", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-06", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-06", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-07", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-07", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-08", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-08", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-PRICE-09", "source": "synthetic_matrix", "notes": "group price", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PRICE-09", "sequence": 2, "expected_objection": {"present": true, "category": "PRICE_BUDGET"}}
+{"meeting_id": "MX-AUTHORITY-01", "source": "synthetic_matrix", "notes": "group authority", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-AUTHORITY-01", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}}
+{"meeting_id": "MX-AUTHORITY-02", "source": "synthetic_matrix", "notes": "group authority", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-AUTHORITY-02", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}}
+{"meeting_id": "MX-AUTHORITY-03", "source": "synthetic_matrix", "notes": "group authority", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-AUTHORITY-03", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}}
+{"meeting_id": "MX-AUTHORITY-04", "source": "synthetic_matrix", "notes": "group authority", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-AUTHORITY-04", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}}
+{"meeting_id": "MX-AUTHORITY-05", "source": "synthetic_matrix", "notes": "group authority", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-AUTHORITY-05", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}}
+{"meeting_id": "MX-AUTHORITY-06", "source": "synthetic_matrix", "notes": "group authority", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-AUTHORITY-06", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}}
+{"meeting_id": "MX-AUTHORITY-07", "source": "synthetic_matrix", "notes": "group authority", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-AUTHORITY-07", "sequence": 2, "expected_objection": {"present": true, "category": "AUTHORITY_INTERNAL_BUY_IN"}}
+{"meeting_id": "MX-DISCOVERY-01", "source": "synthetic_matrix", "notes": "group discovery", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-DISCOVERY-01", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-DISCOVERY-02", "source": "synthetic_matrix", "notes": "group discovery", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-DISCOVERY-02", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-DISCOVERY-03", "source": "synthetic_matrix", "notes": "group discovery", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-DISCOVERY-03", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-DISCOVERY-04", "source": "synthetic_matrix", "notes": "group discovery", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-DISCOVERY-04", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-IMPLEMENTATION-01", "source": "synthetic_matrix", "notes": "group implementation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-IMPLEMENTATION-01", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION"}}
+{"meeting_id": "MX-IMPLEMENTATION-02", "source": "synthetic_matrix", "notes": "group implementation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-IMPLEMENTATION-02", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION"}}
+{"meeting_id": "MX-IMPLEMENTATION-03", "source": "synthetic_matrix", "notes": "group implementation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-IMPLEMENTATION-03", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION"}}
+{"meeting_id": "MX-IMPLEMENTATION-04", "source": "synthetic_matrix", "notes": "group implementation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-IMPLEMENTATION-04", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION", "acceptable_categories": ["TIMING_PRIORITY"]}}
+{"meeting_id": "MX-IMPLEMENTATION-05", "source": "synthetic_matrix", "notes": "group implementation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-IMPLEMENTATION-05", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION"}}
+{"meeting_id": "MX-IMPLEMENTATION-06", "source": "synthetic_matrix", "notes": "group implementation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-IMPLEMENTATION-06", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION"}}
+{"meeting_id": "MX-IMPLEMENTATION-07", "source": "synthetic_matrix", "notes": "group implementation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-IMPLEMENTATION-07", "sequence": 2, "expected_objection": {"present": true, "category": "IMPLEMENTATION_INTEGRATION", "acceptable_categories": ["TIMING_PRIORITY"]}}
+{"meeting_id": "MX-COMPETITION-01", "source": "synthetic_matrix", "notes": "group competition", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-COMPETITION-01", "sequence": 2, "expected_objection": {"present": true, "category": "COMPETITION_EXISTING_SOLUTION"}}
+{"meeting_id": "MX-COMPETITION-02", "source": "synthetic_matrix", "notes": "group competition", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-COMPETITION-02", "sequence": 2, "expected_objection": {"present": true, "category": "COMPETITION_EXISTING_SOLUTION"}}
+{"meeting_id": "MX-COMPETITION-03", "source": "synthetic_matrix", "notes": "group competition", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-COMPETITION-03", "sequence": 2, "expected_objection": {"present": true, "category": "COMPETITION_EXISTING_SOLUTION"}}
+{"meeting_id": "MX-COMPETITION-04", "source": "synthetic_matrix", "notes": "group competition", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-COMPETITION-04", "sequence": 2, "expected_objection": {"present": true, "category": "COMPETITION_EXISTING_SOLUTION"}}
+{"meeting_id": "MX-COMPETITION-05", "source": "synthetic_matrix", "notes": "group competition", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-COMPETITION-05", "sequence": 2, "expected_objection": {"present": true, "category": "COMPETITION_EXISTING_SOLUTION"}}
+{"meeting_id": "MX-COMPETITION-06", "source": "synthetic_matrix", "notes": "group competition", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-COMPETITION-06", "sequence": 2, "expected_objection": {"present": true, "category": "COMPETITION_EXISTING_SOLUTION"}}
+{"meeting_id": "MX-NEED_VALUE-01", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-01", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT"}}
+{"meeting_id": "MX-NEED_VALUE-02", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-02", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT"}}
+{"meeting_id": "MX-NEED_VALUE-03", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-03", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT"}}
+{"meeting_id": "MX-NEED_VALUE-04", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-04", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT"}}
+{"meeting_id": "MX-NEED_VALUE-05", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-05", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT"}}
+{"meeting_id": "MX-NEED_VALUE-06", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-06", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT"}}
+{"meeting_id": "MX-NEED_VALUE-07", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-07", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT"}}
+{"meeting_id": "MX-NEED_VALUE-08", "source": "synthetic_matrix", "notes": "group need_value", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEED_VALUE-08", "sequence": 2, "expected_objection": {"present": true, "category": "NEED_VALUE_FIT", "acceptable_categories": ["PRICE_BUDGET"]}}
+{"meeting_id": "MX-TIMING-01", "source": "synthetic_matrix", "notes": "group timing", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-TIMING-01", "sequence": 2, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}}
+{"meeting_id": "MX-TIMING-02", "source": "synthetic_matrix", "notes": "group timing", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-TIMING-02", "sequence": 2, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}}
+{"meeting_id": "MX-TIMING-03", "source": "synthetic_matrix", "notes": "group timing", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-TIMING-03", "sequence": 2, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}}
+{"meeting_id": "MX-TIMING-04", "source": "synthetic_matrix", "notes": "group timing", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-TIMING-04", "sequence": 2, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}}
+{"meeting_id": "MX-TIMING-05", "source": "synthetic_matrix", "notes": "group timing", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-TIMING-05", "sequence": 2, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}}
+{"meeting_id": "MX-TIMING-06", "source": "synthetic_matrix", "notes": "group timing", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-TIMING-06", "sequence": 2, "expected_objection": {"present": true, "category": "TIMING_PRIORITY"}}
+{"meeting_id": "MX-PAIN-01", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-01", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-PAIN-02", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-02", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-PAIN-03", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-03", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-PAIN-04", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-04", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-PAIN-05", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-05", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-PAIN-06", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-06", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-PAIN-07", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-07", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-PAIN-08", "source": "synthetic_matrix", "notes": "group pain", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-PAIN-08", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-01", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-01", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-02", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-02", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-03", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-03", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-04", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-04", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-05", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-05", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-06", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-06", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-07", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-07", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-08", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-08", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-09", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-09", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-INFORMATION-10", "source": "synthetic_matrix", "notes": "group information", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-INFORMATION-10", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-01", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-01", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-02", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-02", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-03", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-03", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-04", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-04", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-05", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-05", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-06", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-06", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-07", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-07", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-BUYING-08", "source": "synthetic_matrix", "notes": "group buying", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-BUYING-08", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-01", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-01", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-02", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-02", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-03", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-03", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-04", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-04", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-05", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-05", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-06", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-06", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-07", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-07", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEGATION-08", "source": "synthetic_matrix", "notes": "group negation", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEGATION-08", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEUTRAL-01", "source": "synthetic_matrix", "notes": "group neutral", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEUTRAL-01", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEUTRAL-02", "source": "synthetic_matrix", "notes": "group neutral", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEUTRAL-02", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEUTRAL-03", "source": "synthetic_matrix", "notes": "group neutral", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEUTRAL-03", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEUTRAL-04", "source": "synthetic_matrix", "notes": "group neutral", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEUTRAL-04", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEUTRAL-05", "source": "synthetic_matrix", "notes": "group neutral", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEUTRAL-05", "sequence": 2, "expected_objection": {"present": false}}
+{"meeting_id": "MX-NEUTRAL-06", "source": "synthetic_matrix", "notes": "group neutral", "scope": {"objections": "COMPLETE", "opportunities": "NONE", "facts": "NONE", "seller_action": "NONE"}}
+{"meeting_id": "MX-NEUTRAL-06", "sequence": 2, "expected_objection": {"present": false}}

@@ -370,10 +370,24 @@ def _card_key(e: dict[str, Any]) -> str | None:
         else sa["source_id"].split(":")[0]
 
 
+def _episodes_of_cards(trace, utts, mid: str) -> dict[str, int | None]:
+    """rec:<id> -> the labeled objection episode its analysis lines fall in (index), or None."""
+    seqs = _seqmap(trace).get(mid, {})
+    present = [u for u in utts.get(mid, []) if (u.get("expected_objection") or {}).get("present") is True]
+    out: dict[str, int | None] = {}
+    for e in trace:
+        if e["meeting_id"] == mid and e["kind"] == "analysis" and e["timing"].get("recommendation_id") is not None:
+            lines = {e["sequence"], *(seqs.get(s) for s in e["timing"].get("target_segment_ids", []))}
+            out[f"rec:{e['timing']['recommendation_id']}"] = next(
+                (i for i, u in enumerate(present) if _span(u) & lines), None)
+    return out
+
+
 def seller_metrics(calls, utts, trace, issues, ttl: float = 90.0) -> dict[str, Any]:
     stale = repeat = 0
     for mid in sorted({e["meeting_id"] for e in trace}):
         evs = [e for e in trace if e["meeting_id"] == mid]
+        episode = _episodes_of_cards(trace, utts, mid)
         displaced: set[str] = set()
         seen: dict[str, tuple[str, float]] = {}  # key -> (source_id, visible_at) of the last card with that key
         last = None
@@ -387,7 +401,11 @@ def seller_metrics(calls, utts, trace, issues, ttl: float = 90.0) -> dict[str, A
                     issues.append(_issue(mid, "seller_action", "STALE_CARD", e.get("sequence"), actual=sa["source_id"]))
                 key = _card_key(e)
                 prev = seen.get(key)
-                if prev and prev[0] != sa["source_id"] and e["visible_at"] - prev[1] < ttl:
+                # two labeled objection episodes of the same category are two cards, not a duplicate
+                distinct = (sa["source"] == "OBJECTION" and episode.get(prev[0]) is not None
+                            and episode.get(sa["source_id"]) is not None
+                            and episode[prev[0]] != episode[sa["source_id"]]) if prev else False
+                if prev and prev[0] != sa["source_id"] and e["visible_at"] - prev[1] < ttl and not distinct:
                     repeat += 1
                     issues.append(_issue(mid, "seller_action", "DUPLICATE_CARD", e.get("sequence"), actual=key))
                 seen[key] = (sa["source_id"], e["visible_at"])
@@ -503,8 +521,8 @@ def pattern(issue: dict[str, Any], ctx: dict[str, Any]) -> str:
             return "CONTEXT_LEAK"
         return "OTHER_FALSE_OBJECTION"
     if dim == "objection" and kind == "FN":
-        if ctx.get("analyzed") == "COALESCED":
-            return "COALESCED_LINE"
+        if ctx.get("analyzed") == "COALESCED":  # read in a later batch (the model or a gate missed it) or never
+            return "MODEL_FN_IN_BATCH" if ctx.get("covered_by") else "PIPELINE_COALESCED"
         if ctx.get("analyzed") == "LEAD_UTTERANCE_TOO_SHORT":
             return "TOO_SHORT"
         if issue.get("expected") == "AUTHORITY_INTERNAL_BUY_IN":
@@ -522,6 +540,9 @@ def pattern(issue: dict[str, Any], ctx: dict[str, Any]) -> str:
             else f"MISSED_FACT:{str(issue.get('expected', '')).split(':')[0]}"
     if dim == "fact":
         return "FALSE_FACT"
+    if dim == "seller_action" and kind == "WRONG_CARD" and str(
+            (ctx.get("objection") or {}).get("reason") or "").startswith("GUIDANCE_"):
+        return "GUIDANCE_FAILED"  # the objection was detected; its guidance failed closed, so no card
     if dim == "seller_action":
         return {"STALE_CARD": "STALE_OBJECTION", "DUPLICATE_CARD": "DUPLICATE_CARD"}.get(kind, "WRONG_CARD")
     return "WRONG_RULE_STATUS"
@@ -542,7 +563,14 @@ def context(trace: list[dict[str, Any]], mid: str, seq: int | None, n: int = 5) 
         ops.update(dict.fromkeys(e["opportunities_created"], "ACTIVE"))
         ops.update(dict.fromkeys(e["opportunities_resolved"], "RESOLVED"))
     earlier = [e["objection"]["category"] for e in utt[:i] if e["objection"]["detected"]]
+    # a coalesced line still reaches the next analysis as one of its targets (latest-wins keeps every new lead
+    # line): which analysis read it, if any
+    sid = utt[i].get("segment_id")
+    covered = next(({"sequence": e["sequence"], "category": e["timing"].get("category"),
+                     "reason": e["timing"].get("reason")} for e in evs
+                    if e["kind"] == "analysis" and sid in e["timing"].get("target_segment_ids", [])), None)
     return {"text": utt[i]["text"], "role": utt[i]["role"], "analyzed": utt[i]["objection"]["analyzed"],
+            "covered_by": covered,
             "previous": [{"sequence": e["sequence"], "role": e["role"], "text": e["text"]} for e in utt[max(0, i - n):i]],
             "objection": utt[i]["objection"], "facts": facts, "opportunities": ops,
             "earlier_categories": earlier, "seller_action": evs[upto]["seller_action"]}

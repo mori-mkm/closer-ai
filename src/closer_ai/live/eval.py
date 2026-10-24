@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from closer_ai.live.server import Runtime, parse_utterance
-from closer_ai.live.session import LiveConfig
+from closer_ai.live.session import REJECTION_REASONS, LiveConfig
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = ROOT / "evals" / "real_calls" / "fixtures"
@@ -264,14 +264,14 @@ def _add(runtime: Runtime, s: Any, r: dict[str, Any], ts: float) -> str:
 def _timing(t: dict[str, Any]) -> dict[str, Any]:
     keep = ("classification_source", "outcome", "reason", "category", "target_segment_ids", "recommendation_id",
             "classifier_latency_ms", "guidance_latency_ms", "end_to_end_latency_ms", "queue_wait_ms",
-            "superseded_leads", "error_type")
+            "superseded_leads", "error_type", "guard_ms", "category_before", "guidance_rejection")
     return {k: t[k] for k in keep if k in t}
 
 
 def detected(timing: dict[str, Any]) -> bool:
     """The engine decided there is an objection (recorded in the Commercial State): it passed the
-    classifier, validation, anchoring and corroboration gates. Guidance may still have failed."""
-    return bool(timing.get("category")) and timing.get("reason") != "UNCORROBORATED_CATEGORY"
+    classifier, validation, anchoring, the non-objection guard and the gates. Guidance may still have failed."""
+    return bool(timing.get("category")) and timing.get("reason") not in REJECTION_REASONS
 
 
 def _annotate(events: list[dict[str, Any]], s: Any, recs: dict[int, Any]) -> list[dict[str, Any]]:

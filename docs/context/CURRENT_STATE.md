@@ -170,3 +170,15 @@ inspetores FP/FN; EVAL_REPORT.md; `--compare`, `--rescore`, `--resume`). Contrat
 [`evals/real_calls/`](../../evals/real_calls/README.md); suíte de regressões conhecidas + kit sintético (lido
 in place, referência ≠ gold). Só medição: nenhum comportamento de produção mudou. Calls reais: nenhuma no
 repo e processamento ainda bloqueado por autorização.
+**Classifier Quality v1** (branch `fix/classifier-quality-v1`): etapa determinística antes de aceitar uma
+objeção (`screen` em `live/session.py`): non-objection guard (pergunta informativa, preço negado/orçamento
+positivo, dor atual → `NON_OBJECTION_INFORMATION_REQUEST` / `NEGATED_RESISTANCE` / `PAIN_NOT_OBJECTION`),
+normalizações PRICE/COMPETITION sobre NEED_VALUE_FIT, gates para NEED_VALUE_FIT e COMPETITION, cues de
+AUTHORITY (conselho, assinatura) e IMPLEMENTATION (quem tocaria, alguém dedicado) ampliados; buying question
+→ `buying_signals` no Commercial State (léxico OP-14); 2 linhas no prompt LIVE TARGET (KEEP: sem efeito na matriz, 86/87 com e sem; sem elas
+CAL03@12 isolado vira FP TERMS_PROCESS 5/5 — com elas o modelo devolve saída inválida e o fail-closed
+descarta, 0/5). Matriz sintética de 87
+casos em `evals/real_calls/matrix/`. Gate de IMPLEMENTATION exige tópico + resistência; barreira de caixa sem
+adiamento → PRICE. Run completo qwen3:8b (19 calls, `candidate-classifier-v1-final`): precision 0.600 → 1.000,
+recall 0.750 → 0.938, FPR 0.286 → 0.000, category accuracy 0.750 → 0.933, buying_signal 0/1 → 1/1. KR-STALE-AUTHORITY ×10,
+causas de GUIDANCE_INVALID_RESPONSE e `category_status: NO_OBJECTION` inválido ficam para Guidance Reliability v1.
