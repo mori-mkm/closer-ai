@@ -154,6 +154,7 @@
       else if (v.detected) box.append(el("div", "empty", "Preparando a sugestão…"));
       return;
     }
+    if (v.rec.kind === "opportunity") box.append(el("div", "lbl ready", `Oportunidade · ${v.rec.label}`));
     box.append(el("div", "lbl", "Cliente disse"), el("div", "said", `“${v.rec.said}”`),
       el("div", "lbl ready", "Sugestão"), el("div", "say", `“${v.rec.question}”`));
     if (v.rec.objective) box.append(el("div", "obj", `Objetivo: ${v.rec.objective}`));
@@ -161,7 +162,8 @@
     const dismiss = el("button", "btn", "Dispensar");
     dismiss.onclick = () => {
       dispatch({ type: "dismiss", recId: v.rec.id });
-      send({ type: "dismiss", body: { meeting_id: meetingId } }).then(poll);
+      const body = v.rec.opportunityId ? { meeting_id: meetingId, opportunity_id: v.rec.opportunityId } : { meeting_id: meetingId };
+      send({ type: "dismiss", body }).then(poll);
     };
     foot.append(el("span", "chip", v.rec.label || ""), dismiss);
     box.append(foot);
@@ -204,7 +206,7 @@
     if (ui.open === "history") renderHistory(view.history); else shownHistory = "";
     if (ui.open === "advanced") {
       const a = view.advanced;
-      $("adv").textContent = [...(a.brief ? [...a.brief, ""] : []), ...a.basic, ...(a.commercial ? ["", ...a.commercial] : []), ...(a.compliance ? ["", ...a.compliance] : []), ...(a.technical ? ["", ...a.technical]
+      $("adv").textContent = [...(a.brief ? [...a.brief, ""] : []), ...a.basic, ...(a.commercial ? ["", ...a.commercial] : []), ...(a.compliance ? ["", ...a.compliance] : []), ...(a.opportunities ? ["", ...a.opportunities] : []), ...(a.technical ? ["", ...a.technical]
         : ["", "Detalhes técnicos: inicie o runtime com --debug."])].join("\n");
     }
   }

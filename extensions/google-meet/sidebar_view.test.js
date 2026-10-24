@@ -224,3 +224,40 @@ test("playbook compliance is shown only in the advanced panel, by stage, with it
   assert.ok(!visible.includes("E3-R1")); // main UX untouched
   assert.strictEqual(dockView(ready, ctx).advanced.compliance, null); // older runtime: nothing shown
 });
+
+const opportunity = {
+  source: "OPPORTUNITY", source_id: "OP-03:socio#1", priority: 2, title: "Decisor ainda não envolvido",
+  customer_quote: "Preciso falar com meu sócio antes de fechar.",
+  action: "Mencione a 2ª cadeira e combine uma próxima conversa com o decisor, com data e hora.",
+  objective: "envolver o decisor", segment_ids: ["seg_8"],
+};
+
+test("an opportunity uses the same Sugestão card, labeled, with the client's words and the action", () => {
+  const v = dockView({ state: "NONE", status: "CAPTURING", transcript, seller_action: opportunity }, ctx);
+  assert.strictEqual(v.status, "Oportunidade");
+  assert.strictEqual(v.tone, "ready");
+  assert.deepStrictEqual(v.rec, { id: "op:OP-03:socio#1", said: opportunity.customer_quote, question: opportunity.action,
+    objective: "envolver o decisor", label: "Decisor ainda não envolvido", kind: "opportunity", opportunityId: "OP-03:socio#1" });
+  const s = dockReducer(DOCK_INITIAL, { type: "data", recId: v.rec.id, now: 0 });
+  assert.ok(dockChrome(s, v, 1).badge); // a new opportunity is announced like a new suggestion
+});
+
+test("one seller action: the objection card wins unless the runtime picked the opportunity", () => {
+  const objection = { source: "OBJECTION", source_id: "rec:1", priority: 0 };
+  assert.strictEqual(dockView({ ...ready, seller_action: objection }, ctx).rec.id, 1);
+  assert.strictEqual(dockView({ ...ready, seller_action: opportunity }, ctx).rec.kind, "opportunity"); // e.g. buying signal
+  assert.strictEqual(dockView({ state: "NONE", transcript, seller_action: null }, ctx).rec, null);
+});
+
+test("opportunities are listed by status in the advanced panel only", () => {
+  const opportunities = { opportunities: [
+    { playbook_op_id: "OP-03", title: "Decisor ainda não envolvido", status: "ACTIVE", trigger_segment_ids: ["seg_8"], supporting_segment_ids: [] },
+    { playbook_op_id: "OP-14", title: "Sinal de compra", status: "RESOLVED", trigger_segment_ids: ["seg_15"], supporting_segment_ids: ["seg_16"] },
+  ] };
+  const v = dockView({ ...ready, opportunities }, ctx);
+  assert.deepStrictEqual(v.advanced.opportunities, ["OPPORTUNITIES", "ACTIVE", "- OP-03 Decisor ainda não envolvido [seg_8]",
+    "RESOLVED", "- OP-14 Sinal de compra [seg_15 → seg_16]", "SUPPRESSED", "- -"]);
+  assert.strictEqual(dockView(ready, ctx).advanced.opportunities, null);
+  const visible = JSON.stringify([v.status, v.rec, v.history, v.advanced.basic]);
+  assert.ok(!visible.includes("OP-03"));
+});

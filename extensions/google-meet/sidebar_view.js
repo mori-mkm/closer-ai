@@ -59,6 +59,24 @@ function complianceLines(c) {
   return lines;
 }
 
+/** Opportunities by status for the advanced panel (null when the runtime has none). */
+function opportunityLines(o) {
+  if (!o) return null;
+  const lines = ["OPPORTUNITIES"];
+  const ops = o.opportunities || [];
+  for (const status of ["ACTIVE", "RESOLVED", "SUPPRESSED"]) {
+    lines.push(status);
+    const mine = ops.filter((x) => x.status === status);
+    if (!mine.length) lines.push("- -");
+    for (const x of mine) {
+      const ids = x.trigger_segment_ids.join(", ");
+      const extra = x.supporting_segment_ids && x.supporting_segment_ids.length ? ` → ${x.supporting_segment_ids.join(", ")}` : "";
+      lines.push(`- ${x.playbook_op_id} ${x.title} [${ids}${extra}]`);
+    }
+  }
+  return lines;
+}
+
 /**
  * data: the runtime answer (or null when it is unreachable).
  * ctx: { runtimeOk, captionsOn, meetingId, health: {model_state}|null,
@@ -68,9 +86,15 @@ function dockView(data, ctx) {
   const d = data || {};
   const debug = Boolean(d.debug);
   const a = d.active_analysis || null;
-  const rec = d.state === "ACTIVE"
-    ? { id: d.id, said: d.lead_said, question: d.question, objective: d.objective || null, label: d.label }
-    : null;
+  // The runtime arbitrates ONE seller action: an opportunity replaces the objection card only when the
+  // runtime says so (seller_action); an older runtime without it shows the recommendation as before.
+  const sa = d.seller_action || null;
+  const rec = sa && sa.source === "OPPORTUNITY"
+    ? { id: `op:${sa.source_id}`, said: sa.customer_quote, question: sa.action, objective: sa.objective || null,
+      label: sa.title, kind: "opportunity", opportunityId: sa.source_id }
+    : d.state === "ACTIVE"
+      ? { id: d.id, said: d.lead_said, question: d.question, objective: d.objective || null, label: d.label }
+      : null;
   const analyzing = a ? { text: a.text_preview } : null;
   const detected = a && a.detected_category ? { label: a.label || a.detected_category } : null;
 
@@ -80,7 +104,7 @@ function dockView(data, ctx) {
   else if (!ctx.captionsOn) [tone, status] = ["idle", "Ative as legendas (CC)"];
   else if (detected) [tone, status] = ["objection", "Objeção detectada"];
   else if (a || d.status === "ANALYZING") [tone, status] = ["analyzing", "Analisando…"];
-  else if (rec) [tone, status] = ["ready", "Sugestão pronta"];
+  else if (rec) [tone, status] = ["ready", rec.kind === "opportunity" ? "Oportunidade" : "Sugestão pronta"];
   else if (d.status === "ERROR") [tone, status] = ["idle", "Erro na análise"];
   else [tone, status] = ["listening", "Ouvindo"];
 
@@ -106,6 +130,7 @@ function dockView(data, ctx) {
   if (warning) basic.push(`Atenção: ${warning.text}`);
   const commercial = commercialLines(d.commercial_state);
   const compliance = complianceLines(d.playbook_compliance);
+  const opportunities = opportunityLines(d.opportunities);
   const brief = d.post_call_brief ? d.post_call_brief.markdown.trimEnd().split("\n") : null; // after finalize
   let technical = null;
   if (debug) {
@@ -132,7 +157,10 @@ function dockView(data, ctx) {
       `recommendations_created: ${rc.recommendations_created ?? "-"} · model_state: ${d.debug.model_state || "-"}`,
       `analysis_error_reasons: ${kv(d.debug.analysis_error_reasons || {})}`,
       `commercial: ${kv(d.debug.commercial_counters || {})}`,
-      `compliance_ms: ${d.debug.compliance_ms ?? "-"}`,
+      `compliance_ms: ${d.debug.compliance_ms ?? "-"} · opportunity_ms: ${d.debug.opportunity_ms ?? "-"} · arbitration_ms: ${d.debug.arbitration_ms ?? "-"}`,
+      `seller_action_source: ${d.debug.seller_action_source || "-"} · seller_action_priority: ${d.debug.seller_action_priority ?? "-"}`,
+      `opportunities: ${kv(Object.fromEntries(Object.entries(d.debug.opportunity_counters || {}).filter(([, v]) => typeof v === "number")))}`,
+      `seller_actions_from_objection: ${d.debug.seller_actions_from_objection ?? "-"} · seller_actions_from_opportunity: ${d.debug.seller_actions_from_opportunity ?? "-"}`,
     ];
     if (a) technical.push(`active_segment: ${a.segment_id}${a.detected_category ? ` · ${a.detected_category}` : ""}`);
     if (rec) {
@@ -151,7 +179,7 @@ function dockView(data, ctx) {
     technical.push("", `meeting_id: ${ctx.meetingId}`);
   }
 
-  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, commercial, compliance, brief, technical } };
+  return { tone, color: TONES[tone], status, rec, analyzing, detected, history, warning, advanced: { basic, commercial, compliance, opportunities, brief, technical } };
 }
 
 const DOCK_INITIAL = Object.freeze({ open: null, seenRecId: null, notifiedRecId: null, toastUntil: 0 });
@@ -198,5 +226,5 @@ function dockChrome(state, view, now) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { dockView, dockReducer, dockChrome, commercialLines, complianceLines, DOCK_INITIAL, TONES, TOAST_MS };
+  module.exports = { dockView, dockReducer, dockChrome, commercialLines, complianceLines, opportunityLines, DOCK_INITIAL, TONES, TOAST_MS };
 }

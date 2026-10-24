@@ -8,6 +8,7 @@
     python -m closer_ai.live.bench --authority      # stakeholder discovery answers vs authority blocking objections
     python -m closer_ai.live.bench --latency --repeat 5 --label A --out runs/A.jsonl   # P1 latency matrix
     python -m closer_ai.live.bench --compliance     # Playbook Compliance growing line by line (one call)
+    python -m closer_ai.live.bench --sales-intelligence   # 12 replay scenarios: opportunities, seller action
 
 Each run is a fresh meeting: one closer line, then the case's lead line. The lead line goes through
 `Runtime.receive` (background worker, as from the extension), and a poller calls
@@ -112,6 +113,176 @@ COMPLIANCE_CALL = [  # invented AgroTalento-style call (no client content); Play
     ("closer", "Eu te ligo terça às 14h para conversarmos com ele."),
     ("lead", "Fechado, terça às 14h."),
 ]
+# Sales Intelligence replay (invented lines, no client content). expect: final state; checkpoints: (after line n,
+# expect). Keys: "ops" {OP id: status} (any other OP = a false opportunity), "rules" {rule: status},
+# "seller" "OBJECTION" | "OP-xx" | None, "objection" category or None (real model only: "objection" is
+# checked only when `check_objections`).
+SALES_SCENARIOS = [
+    ("decision_blocker",
+     [("closer", "O que você achou da proposta?"), ("lead", "Preciso falar com meu sócio antes de fechar."),
+      ("closer", "Vamos marcar com seu sócio terça às 14h?"), ("lead", "Pode ser.")],
+     {"ops": {"OP-03": "RESOLVED"}, "rules": {"E6-R2": "SATISFIED"}},
+     [(2, {"ops": {"OP-03": "ACTIVE"}, "rules": {"E6-R2": "PENDING"}, "seller": "OBJECTION",
+           "objection": "AUTHORITY_INTERNAL_BUY_IN"})]),
+    ("discovery_only",
+     [("closer", "Além de você, quem participa da decisão?"), ("lead", "Meu sócio.")],
+     {"ops": {}, "rules": {"E6-R1": "SATISFIED"}, "seller": None, "objection": None}, []),
+    ("think_it_over",
+     [("closer", "Esse é o formato do programa."), ("lead", "Vou pensar."),
+      ("closer", "O que exatamente você precisa pensar?")],
+     {"ops": {"OP-12": "RESOLVED"}, "rules": {"E11-R2": "SATISFIED"}},
+     [(2, {"ops": {"OP-12": "ACTIVE"}})]),
+    ("buying_signal",
+     [("closer", "Esse é o formato do programa."), ("lead", "Posso pagar no cartão da empresa?"),
+      ("closer", "Faz sentido a gente seguir então?")],
+     {"ops": {"OP-14": "RESOLVED"}, "rules": {"E11-R4": "SATISFIED"}},
+     [(2, {"ops": {"OP-14": "ACTIVE"}, "seller": "OP-14"})]),
+    ("no_decision_ask",
+     [("closer", "Esse é o formato do programa."), ("lead", "Quando eu começo, se eu entrar?"),
+      ("closer", "Deixa eu te mostrar os encontros presenciais.")],
+     {"ops": {"OP-14": "ACTIVE"}, "rules": {"E11-R4": "PENDING"}, "seller": "OP-14"}, []),
+    ("owner_dependency",
+     [("closer", "Como funciona a rotina da fazenda?"), ("lead", "Hoje tudo depende de mim na fazenda."),
+      ("closer", "Isso é exatamente o pilar Fazenda Autônoma.")],
+     {"ops": {"OP-06": "RESOLVED"}}, [(2, {"ops": {"OP-06": "ACTIVE"}, "seller": "OP-06"})]),
+    ("financial_visibility",
+     [("closer", "Como vocês acompanham os números?"), ("lead", "Eu nem sei minha margem."),
+      ("closer", "E qual seria o seu custo por arroba hoje?")],
+     {"ops": {"OP-07": "RESOLVED"}}, [(2, {"ops": {"OP-07": "ACTIVE"}})]),
+    ("time_concern",
+     [("closer", "O que você achou do formato?"), ("lead", "Não tenho tempo para mais um programa."),
+      ("closer", "O problema é a agenda dos encontros ou a prioridade neste momento?")],
+     {"ops": {"OP-10": "RESOLVED"}}, [(2, {"ops": {"OP-10": "ACTIVE"}})]),
+    ("prior_bad_experience",
+     [("closer", "Você já participou de algo parecido?"),
+      ("lead", "Já fiz duas mentorias e não coloquei nada em prática."),
+      ("closer", "O que faltou para colocar em prática?")],
+     {"ops": {"OP-11": "RESOLVED"}}, [(2, {"ops": {"OP-11": "ACTIVE"}})]),
+    ("multiple_signals",
+     [("closer", "O investimento é de 63 mil à vista ou em 12x no cartão."),
+      ("lead", "Achei caro e preciso falar com meu sócio."),
+      ("lead", "Mas se eu fechar, posso pagar no cartão da empresa?")],
+     {"ops": {"OP-03": "ACTIVE", "OP-14": "ACTIVE"}, "seller": "OP-14", "rules": {"E9-R1": "SATISFIED"}}, []),
+    ("acceptance",
+     [("closer", "Quem participa da decisão?"), ("lead", "Meu sócio."),
+      ("lead", "Mas preciso falar com ele antes de fechar."), ("closer", "Vamos marcar com ele terça às 14h."),
+      ("lead", "E se eu pagar no cartão da empresa?"), ("closer", "Faz sentido a gente seguir?")],
+     {"ops": {"OP-03": "RESOLVED", "OP-14": "RESOLVED"}, "rules": {"E6-R2": "SATISFIED", "E11-R4": "SATISFIED"},
+      "seller": None},  # the AUTHORITY card was superseded by OP-03's meeting: it never comes back
+     [(2, {"ops": {}, "rules": {"E6-R1": "SATISFIED"}, "seller": None, "objection": None}),
+      (3, {"ops": {"OP-03": "ACTIVE"}, "rules": {"E6-R2": "PENDING"}, "objection": "AUTHORITY_INTERNAL_BUY_IN"}),
+      (4, {"ops": {"OP-03": "RESOLVED"}, "rules": {"E6-R2": "SATISFIED"}}),
+      (5, {"ops": {"OP-03": "RESOLVED", "OP-14": "ACTIVE"}, "seller": "OP-14"})]),
+    ("price_then_buying_signal",
+     [("closer", "O investimento é de 63 mil."), ("lead", "Achei caro pra gente."),
+      ("closer", "Entendo. Caro comparando com o quê?"), ("lead", "Posso pagar no cartão da empresa?"),
+      ("closer", "Faz sentido a gente seguir?")],
+     {"ops": {"OP-14": "RESOLVED"}, "rules": {"E11-R4": "SATISFIED"}, "seller": None},
+     [(2, {"ops": {}, "seller": "OBJECTION", "objection": "PRICE_BUDGET"}),
+      (4, {"ops": {"OP-14": "ACTIVE"}, "seller": "OP-14"})]),
+    ("price_then_neutral_fact",
+     [("closer", "O investimento é de 63 mil."), ("lead", "Achei caro pra gente."),
+      ("lead", "Hoje temos cinco pessoas no time.")],
+     {"ops": {}, "seller": "OBJECTION", "objection": "PRICE_BUDGET"}, []),
+    ("false_positive_guards",
+     [("closer", "Quem mais está envolvido?"), ("lead", "Eu e minha esposa."),
+      ("lead", "O financeiro também participa."), ("lead", "Isso faz a equipe perder muito tempo."),
+      ("lead", "Gostei bastante da apresentação.")],
+     {"ops": {}, "seller": None}, []),
+]
+
+
+def sales_snapshot(runtime: Runtime, meeting_id: str) -> dict:
+    """What the copilot knows and shows right now (one consistent read)."""
+    s = runtime.sessions[meeting_id]
+    view = runtime.recommendation(meeting_id)
+    ops = view["opportunities"]["opportunities"]
+    rec = s.current()
+    return {"ops": {o["playbook_op_id"]: o["status"] for o in ops},
+            "op_instances": [o["id"] for o in ops],
+            "rules": {r["rule_id"]: r["status"] for r in view["playbook_compliance"]["rule_results"]},
+            "seller": (None if not view["seller_action"] else "OBJECTION" if view["seller_action"]["source"] == "OBJECTION"
+                       else view["seller_action"]["source_id"].split(":")[0]),
+            "seller_action": view["seller_action"], "objection": rec.category if rec else None,
+            "objections": [f["value"] for f in s.commercial.view()["objections"]],
+            "ms": {"compliance": s.compliance_ms, "opportunity": s.opportunity_ms, "arbitration": s.arbitration_ms}}
+
+
+def sales_check(snap: dict, expect: dict, check_objections: bool) -> list[str]:
+    errors = []
+    if "ops" in expect:
+        for op, status in expect["ops"].items():
+            if snap["ops"].get(op) != status:
+                errors.append(f"{op}: {snap['ops'].get(op)} != {status}")
+        errors += [f"unexpected {op}" for op in snap["ops"] if op not in expect["ops"]]
+    errors += [f"{r}: {snap['rules'].get(r)} != {v}" for r, v in expect.get("rules", {}).items()
+               if snap["rules"].get(r) != v]
+    if "seller" in expect and snap["seller"] != expect["seller"]:
+        errors.append(f"seller {snap['seller']} != {expect['seller']}")
+    if check_objections and "objection" in expect and snap["objection"] != expect["objection"]:
+        errors.append(f"objection {snap['objection']} != {expect['objection']}")
+    return errors
+
+
+def run_sales(runtime: Runtime, name: str, lines: list, expect: dict, checkpoints: list,
+              check_objections: bool = True) -> dict:
+    """Stream one scenario like the extension (analysis + facts inline), check the checkpoints and the end."""
+    mid, base = f"si-{name}-{time.time():.0f}", time.time() - 120
+    points = dict(checkpoints)
+    trace, errors, conflicts, stale = [], [], 0, 0
+    displaced: set[str] = set()  # objection cards an opportunity took over
+    last = None
+    for seq, (role, text) in enumerate(lines, 1):
+        runtime.receive(parse_utterance({"meeting_id": mid, "speaker": "Closer Teste" if role == "closer" else
+                                         "Lead Teste", "text": text, "timestamp": base + seq * 8, "sequence": seq},
+                                        runtime.closer_names, base + seq * 8), background=False)
+        snap = sales_snapshot(runtime, mid)
+        sa = snap["seller_action"]
+        # a conflict = an opportunity shown over an active objection card without the buying-signal rule
+        conflicts += bool(snap["objection"] and sa and sa["source"] == "OPPORTUNITY" and sa["priority"] != 1)
+        # stale = an objection card coming back after an opportunity took its place (no dismissals here)
+        if last and last["source"] == "OBJECTION" and sa and sa["source"] == "OPPORTUNITY":
+            displaced.add(last["source_id"])
+        stale += bool(sa and sa["source_id"] in displaced and (not last or last["source_id"] != sa["source_id"]))
+        last = sa
+        trace.append({"seg": f"seg_{seq}", "role": role, "text": text, "objection": snap["objection"],
+                      "ops": snap["ops"], "seller": snap["seller"], "ms": snap["ms"]})
+        if seq in points:
+            errors += [f"@{seq} {e}" for e in sales_check(snap, points[seq], check_objections)]
+    snap = sales_snapshot(runtime, mid)
+    errors += sales_check(snap, expect, check_objections)
+    brief = runtime.sessions[mid].finalize().to_json()["opportunities"]
+    expected_ops = set(expect.get("ops", {})) | {op for _, e in checkpoints for op in e.get("ops", {})}
+    per_op: dict[str, int] = {}
+    for i in snap["op_instances"]:
+        per_op[i.split(":")[0]] = per_op.get(i.split(":")[0], 0) + 1
+    return {"scenario": name, "ok": not errors, "errors": errors, "trace": trace,
+            "commercial_state": {k: [f["value"] for f in v] for k, v in
+                                 runtime.sessions[mid].commercial.view().items() if v},
+            "compliance": {r: v for r, v in snap["rules"].items() if v != "PENDING"},
+            "opportunities": snap["ops"], "seller_action": snap["seller"], "objections": snap["objections"],
+            "missed_at_finalize": [o["playbook_op_id"] for o in brief["missed"]],
+            "false_opportunities": sorted(set(snap["ops"]) - expected_ops),
+            "missed_opportunities": sorted(op for op in expect.get("ops", {}) if op not in snap["ops"]),
+            "duplicates": sum(n - 1 for n in per_op.values()), "seller_conflicts": conflicts,
+            "stale_resurfacing": stale, "recommendations_superseded":
+                runtime.sessions[mid].counters["recommendations_superseded"]}
+
+
+def sales_summary(rows: list[dict]) -> dict:
+    created = sum(len(r["opportunities"]) for r in rows)
+    false = sum(len(r["false_opportunities"]) for r in rows)
+    return {"scenarios_ok": f"{sum(r['ok'] for r in rows)}/{len(rows)}",
+            "false_opportunities": false, "false_opportunity_rate": round(false / created, 3) if created else 0.0,
+            "missed_opportunities": sum(len(r["missed_opportunities"]) for r in rows),
+            "duplicate_opportunities": sum(r["duplicates"] for r in rows),
+            "seller_action_conflicts": sum(r["seller_conflicts"] for r in rows),
+            "stale_recommendation_resurfacing": sum(r["stale_resurfacing"] for r in rows),
+            "recommendations_superseded": sum(r["recommendations_superseded"] for r in rows),
+            "max_ms": {k: max(t["ms"][k] for r in rows for t in r["trace"])
+                       for k in ("compliance", "opportunity", "arbitration")}}
+
+
 COMMERCIAL = [
     ("stakeholder", [Q_DECISION, ("lead", "Sim, meu sócio.")], {"stakeholders": ["socio"]}),
     ("pain", [("closer", CLOSER_LINE), ("lead", "Hoje fazemos tudo manualmente.")], {"pain_points": ["manual"]}),
@@ -350,6 +521,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--sequences", action="store_true", help="run the live SEQUENCES (latest-utterance anchoring)")
     p.add_argument("--commercial", action="store_true", help="run the COMMERCIAL cases (Commercial State v0)")
     p.add_argument("--compliance", action="store_true", help="stream COMPLIANCE_CALL, print compliance per line")
+    p.add_argument("--sales-intelligence", action="store_true",
+                   help="replay SALES_SCENARIOS (--scenarios to pick): opportunities, compliance, seller action")
     p.add_argument("--no-commercial", action="store_true", help="disable commercial facts extraction (A/B)")
     p.add_argument("--authority", action="store_true", help="run the AUTHORITY_MATRIX (discovery vs blocking)")
     p.add_argument("--latency", action="store_true", help="run the LATENCY matrix (per-stage timings + accuracy)")
@@ -444,6 +617,20 @@ def main(argv: list[str] | None = None) -> int:
             "discovery_false_positives": f"{sum(not r['ok'] for r in disc)}/{len(disc)}",
             "blocking_shown": f"{sum(r['ok'] for r in block)}/{len(block)}",
         }}, indent=1), flush=True)
+        return 0
+
+    if a.sales_intelligence:
+        rows = []
+        for name, lines, expect, checkpoints in SALES_SCENARIOS:
+            if a.scenarios and name not in a.scenarios.split(","):
+                continue
+            rows.append(run_sales(runtime, name, lines, expect, checkpoints))
+            print(json.dumps({k: v for k, v in rows[-1].items() if k != "trace"}, ensure_ascii=False), flush=True)
+        print(json.dumps({"sales_intelligence": sales_summary(rows)}, indent=1), flush=True)
+        if a.out:
+            with a.out.open("a", encoding="utf-8") as f:
+                for r in rows:
+                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
         return 0
 
     if a.compliance:

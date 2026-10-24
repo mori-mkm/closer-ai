@@ -652,8 +652,8 @@ Sources:
   - 61 rules, each with its playbook ID, `class` (REQUIRED / RECOMMENDED / OPTIONAL / PROHIBITED), a
     short title, an `evidence_type` and an optional `applies_when` (conditional rules can be
     NOT_APPLICABLE);
-  - `commercial_info` with a `business_status` (CONFIRMED / PENDING_CONFIRMATION).
-- **Business status:** only CONFIRMED items are returned by `Playbook.authorized_commercial_info()`.
+  - `business_knowledge` (renamed from `commercial_info` in Sales Intelligence v1) with a `business_status` (CONFIRMED / PENDING_CONFIRMATION).
+- **Business status:** only CONFIRMED items are returned by `Playbook.authorized_knowledge()`.
   Pending ones (cohort price, 2nd chair at in-person meetings, 30-day guarantee, named cases, time
   commitment, §4 phrases) cannot be used as authorized facts. No guidance consumes the playbook yet.
 
@@ -703,6 +703,160 @@ Limits:
 Demo (real qwen3:8b, invented call): `python -m closer_ai.live.bench --compliance` prints the
 compliance after each line.
 
+## Sales Intelligence v1 (`feat/sales-intelligence-v1`, 2026-10-24)
+
+```
+                     ┌────────────────────┐
+Transcript ─────────→│ Commercial State   │  facts (LLM extraction, grounded; off the critical path)
+      │              └─────────┬──────────┘
+      │  signals.extract       │
+      ├───────────────────────→▼
+      │              ┌────────────────────┐
+      │              │ Playbook Compliance│  19 rules evaluated (deterministic)
+      │              └─────────┬──────────┘
+      │                        ▼
+      │              ┌────────────────────┐
+      └─────────────→│ Opportunity Engine │  OP-01/03/04/06/07/10/11/12/14 (deterministic)
+                     └─────────┬──────────┘
+          objection rec ──┐    │
+                          ▼    ▼
+               Seller Action Arbitration ──→ ONE card in "Sugestão"
+                          │
+                          └──→ Post-call Brief (compliance + resolved / missed / suppressed)
+```
+
+The internal layers can be complex; the seller still sees one card.
+- **No LLM call is added.** Compliance, opportunities and arbitration are pure functions recomputed
+  when the dock polls, and cached until the call changes.
+- **Overhead per new line:** about 0.7 ms at 60 lines, 2 ms at 200 lines and 4.6 ms at 500.
+- **Overhead per unchanged poll:** about 0.01 ms.
+- **Recommendation latency** is unchanged (fast path ~6 s, LLM ~15 s, re-measured).
+
+**Signals** (`signals.py`) are lexical facts about one line, shared by compliance and opportunities and
+cached per line:
+- **Closer:** `DECISION_ASK`, `CAUSE_PROBE`, `TIMING_PROBE`, `NUMBER_PROBE`, `TIME_PROBE`,
+  `EXPERIENCE_PROBE`, `CASH_PROBE`, `PRICE_PRESENTED` (an amount with an investment cue: a lead's
+  "R$ 10 mil" impact never counts), `PAYMENT_TERMS_MENTIONED`, `SECOND_SEAT_OFFERED`,
+  `PILLAR_MENTIONED`, `PROGRAM_BLOCK_MENTIONED`.
+- **Lead:** `DECISION_DEPENDENCY` (with the party: "preciso falar com meu sócio" or "com ele"),
+  `THINK_IT_OVER`, `BUYING_QUESTION`, `OWNER_DEPENDENCY`, `FINANCIAL_BLINDNESS`, `TIME_CONCERN`,
+  `PRIOR_BAD_EXPERIENCE`, `SUCCESSION`, `CASH_TIGHT`.
+- **Either speaker:** `NEXT_STEP_SCHEDULED` (date + time, owner when explicit) and
+  `DECISION_MEETING_SCHEDULED` (a scheduled meeting "com seu sócio" or "com ele").
+- **Cross-line:** `DECIDER_NAMED`, a person named right after "quem participa da decisão?".
+- **Captions without "?":** Meet often drops it. `TIMING_PROBE`, `NUMBER_PROBE`, `TIME_PROBE` and
+  `EXPERIENCE_PROBE` also count when the line opens with a known interrogative structure ("Qual é a sua
+  prioridade", "Quanto tempo você consegue dedicar", after lead-ins like "Entendo."). Statements with the
+  same words do not count ("O momento é agora."). The short close "Vamos seguir?" still needs the "?",
+  because without it the line also means "let's move on" (fail closed).
+
+**Compliance** grows from 10 to 19 evaluated rules, adding:
+- **E5-R1:** satisfied by a timing probe before the first price. A price without a probe stays PENDING
+  and is never VIOLATED, because the probe detector's recall is limited.
+- **E7-R1:** pillars + 6 weeks/placar + year rhythm.
+- **E9-R1:** price presented. NOT_APPLICABLE when there is no price yet and a meeting with the decider
+  is already scheduled.
+- **E9-R3:** payment terms within −2/+6 lines of the price.
+- **E9-R4:** 2nd chair mentioned.
+- **E11-R1:** a decision ask after the price.
+- **E11-R2:** "vou pensar" followed by a cause probe.
+- **E11-R4:** a decision ask within 2 closer turns of a buying signal.
+- **E12-R3:** the closer owns the scheduled follow-up.
+
+**E10-R2** is now decidable:
+- SATISFIED when the closer's first turn after a price/timing objection or a "vou pensar" opens with a
+  cause probe. Short acknowledgements such as "Entendo." may come before it.
+- UNKNOWN when the closer replied without a recognized probe.
+- PENDING when the closer has not replied yet.
+
+**Deciders** (E6-R1, E6-R2, OP-03) combine the Commercial State with the signals, because the 8B
+extractor sometimes records "sócio" only as mentioned, or nothing at all:
+- a stakeholder with a decision role, or named in a decision step;
+- a `DECIDER_NAMED`;
+- the party of a `DECISION_DEPENDENCY`; with a pronoun, the latest person mentioned before it.
+
+**Opportunities** (`opportunities.py`; the JSON `opportunities` section holds all of OP-01…OP-22):
+- **Statuses:**
+  - ACTIVE: a trigger, not covered yet, and always with trigger segment ids;
+  - RESOLVED: the closer covered it after the trigger;
+  - SUPPRESSED: covered before the trigger, or the required business knowledge is not CONFIRMED;
+  - EXPIRED: not produced in v1.
+- **Dedup key:** (OP id, subject). OP-03's subject is the decider ("socio", "pai"); a pronoun joins the
+  current one. The other OPs have one subject per call.
+- **Repeated triggers** add evidence. OP-12 and OP-14 are event-like and reopen only on a trigger after
+  the previous one was resolved; the other OPs never reopen.
+- **Discovery never triggers OP-03.** "Meu sócio.", "Eu e minha esposa." and "O financeiro também
+  participa." have no dependency verb.
+
+| OP | Trigger | Resolved by | Action (from the JSON) |
+|---|---|---|---|
+| OP-14 (priority 1) | BUYING_QUESTION / Commercial State buying signal | DECISION_ASK | Há sinal de compra. Peça a decisão. |
+| OP-03 (2) | DECISION_DEPENDENCY / AUTHORITY objection | meeting with the decider, or 2nd chair (only while `second_chair` is CONFIRMED) | Mencione a 2ª cadeira e combine uma próxima conversa com o decisor, com data e hora. (Without the 2ª cadeira when it is not CONFIRMED.) |
+| OP-12 (3) | THINK_IT_OVER | CAUSE_PROBE | Descubra o que exatamente ele precisa avaliar antes de encerrar. |
+| OP-01 (4) | CASH_TIGHT | PAYMENT_TERMS_MENTIONED / CASH_PROBE | Pergunte quando entra o caixa e explore uma forma de pagamento compatível com esse momento. |
+| OP-06 / OP-07 / OP-04 (5) | OWNER_DEPENDENCY / FINANCIAL_BLINDNESS / SUCCESSION | the confirmed pillar mentioned (OP-07 also by a number probe) | connect the pain to Fazenda Autônoma / Lucro Incontestável / Alavanca do Legado |
+| OP-10 / OP-11 (5) | TIME_CONCERN / PRIOR_BAD_EXPERIENCE | TIME_PROBE / EXPERIENCE_PROBE | probe agenda vs. priority / what failed before |
+
+**Not implemented:**
+- **BLOCKED_BUSINESS_CONFIRMATION:** OP-02 (needs the cohort price) and OP-09 (needs the named cases).
+- **DEFERRED_LOW_CONFIDENCE:** OP-05, 08, 13, 15–22. The reason for each is in the JSON.
+
+**Business safety:**
+- Every action text lives in the JSON.
+- A variant is used only when all the knowledge it names is CONFIRMED.
+- An OP whose required knowledge is not CONFIRMED is SUPPRESSED.
+- No action names a pending condition: no prices, 12x, 30-day guarantee, ~2 h/semana or cases.
+- The three pillars are CONFIRMED `business_knowledge` (the official vocabulary of the 2026 deck).
+
+**Seller Action Arbitration:** exactly one `seller_action` in `GET /recommendation`.
+1. **The active objection recommendation** wins: it answers the lead's newest resistance and its
+   guidance is grounded. Its structural opportunity (an AUTHORITY objection → OP-03) stays internal.
+   - Exception: a buying signal (OP-14) said after the objection's line takes the card, because the lead
+     moved on and the playbook says to ask for the decision right away (E11-R4).
+2. **Otherwise the top ACTIVE opportunity:** OP-14 > OP-03 > OP-12 > OP-01 > the others, newest first on
+   a tie. One the closer dismissed (`POST /dismiss` with `opportunity_id`) is not shown again.
+3. **Compliance gaps are never seller-facing in v1:** there is no reliable "when", and they would nag.
+
+**Stale objection cards:** a recommendation is retired as `SUPERSEDED` (with `superseded_by`, counted in
+`recommendations_superseded`) once later evidence shows the call moved past it. It never comes back,
+even inside its 90 s TTL. Two kinds of evidence count:
+- **Its structural opportunity resolved after it:** AUTHORITY_INTERNAL_BUY_IN ↔ OP-03 (a meeting with the
+  decider was booked, or the 2nd chair was offered while CONFIRMED).
+- **Commercial progress for any category:** a buying signal (OP-14) said after the objection line, and
+  then resolved by the closer's decision ask.
+
+Anything else keeps the card: a neutral line ("Hoje temos cinco pessoas no time."), a probe (the OP-12
+cause probe and the OP-01 cash/payment probes open an objection, they do not answer it), or a buying
+signal said before the objection. A new objection is a new recommendation and is never retired by older
+evidence.
+
+**Panels:**
+- **Dock:** "Sugestão" shows the opportunity in the same card, labeled "Oportunidade · <título>", with
+  Cliente disse / Sugestão / Objetivo.
+- **Avançado:** an OPPORTUNITIES section (ACTIVE / RESOLVED / SUPPRESSED, with segment ids).
+- **`--debug`:** `opportunity_ms`, `arbitration_ms`, `seller_action_source` / `priority`, the
+  opportunity counters and `seller_actions_from_objection` / `_from_opportunity`.
+
+**Post-call Brief:**
+- A `## Opportunities` section with Resolved, Missed and Suppressed.
+- Missed = still ACTIVE at finalize; a missed opportunity is never judged during the call.
+- The summary also lists the required rules still pending and the opportunities seized and missed.
+
+**Recovery:** rehydrated lines + the rebuilt Commercial State rebuild the same opportunities.
+- An OP-03 that only the AUTHORITY objection triggered is not rebuilt, because objections are not
+  rebuilt; the lexical DECISION_DEPENDENCY covers the usual phrasings.
+- Dismissals are not kept across a restart.
+
+**Replay harness:** `python -m closer_ai.live.bench --sales-intelligence [--scenarios a,b]` runs 14
+invented scenarios with checkpoints and reports per scenario plus accuracy, the false opportunity rate,
+missed and duplicate opportunities, seller-action conflicts, stale recommendations resurfacing (an
+objection card back after an opportunity took its place) and max ms.
+- **Fake model (unit test):** 14/14.
+- **Real qwen3:8b (2026-10-24, after the stale-card fix):** 13/14, with 0 false opportunities, 0
+  duplicates, 0 conflicts, 0 stale resurfacing and 3 recommendations superseded. The
+  failure is the classifier labeling "Hoje tudo depende de mim na fazenda." NEED_VALUE_FIT. The objection
+  card correctly won and OP-06 was recorded and resolved internally.
+
 ## Runtime configuration (measured)
 
 Default: qwen3:8b, arm **E1**, `num_ctx` **4096**, 1024 tokens kept for the output. Measured on
@@ -748,6 +902,7 @@ python -m closer_ai.live.bench --precision
 python -m closer_ai.live.bench --commercial     # Commercial State: facts found / invented
 python -m closer_ai.live.bench --latency --repeat 5 --out lat.jsonl   # per-stage latency matrix
 python -m closer_ai.live.bench --compliance   # Playbook Compliance growing line by line
+python -m closer_ai.live.bench --sales-intelligence   # 12 replay scenarios (opportunities, seller action)
 ```
 
 Options:
